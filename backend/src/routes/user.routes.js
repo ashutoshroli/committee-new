@@ -10,4 +10,9 @@ router.post('/', authorize('superadmin', 'admin'), ctrl.create);
 router.put('/:id', authorize('superadmin', 'admin'), ctrl.update);
 router.delete('/:id', authorize('superadmin'), ctrl.remove);
 
+// Permissions tab: grant/manage login access for existing members
+router.post('/grant-access', authorize('superadmin', 'admin'), ctrl.grantAccess);
+router.patch('/:id/role', authorize('superadmin', 'admin'), ctrl.updateRole);
+router.delete('/:id/access', authorize('superadmin', 'admin'), ctrl.revokeAccess);
+
 module.exports = router;

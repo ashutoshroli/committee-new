@@ -65,3 +65,68 @@ exports.remove = asyncHandler(async (req, res) => {
   }
   res.json({ success: true, message: 'User deleted.' });
 });
+
+/**
+ * Grant login access to an existing member.
+ * Creates a user account linked by email, using member's name/phone.
+ */
+exports.grantAccess = asyncHandler(async (req, res) => {
+  const { member_id, email, password, role } = req.body;
+
+  if (!member_id || !email || !password) {
+    return res.status(400).json({ success: false, message: 'Member, email and password are required.' });
+  }
+
+  // Verify member exists
+  const member = await db.query('SELECT * FROM members WHERE id = $1', [member_id]);
+  if (member.rows.length === 0) {
+    return res.status(404).json({ success: false, message: 'Member not found.' });
+  }
+
+  // Check if email already exists
+  const existing = await db.query('SELECT id FROM users WHERE email = $1', [email]);
+  if (existing.rows.length > 0) {
+    return res.status(400).json({ success: false, message: 'Email already has login access.' });
+  }
+
+  const hash = await bcrypt.hash(password, 10);
+  const m = member.rows[0];
+  const result = await db.query(
+    `INSERT INTO users (name, email, password, phone, role) VALUES ($1,$2,$3,$4,$5) RETURNING ${PUBLIC_COLS}`,
+    [m.name, email, hash, m.phone || null, role || 'manager']
+  );
+
+  res.status(201).json({ success: true, message: 'Login access granted.', data: result.rows[0] });
+});
+
+/**
+ * Update only the role of a user (for permissions tab).
+ */
+exports.updateRole = asyncHandler(async (req, res) => {
+  const { role } = req.body;
+  if (!role || !['superadmin', 'admin', 'subadmin', 'manager'].includes(role)) {
+    return res.status(400).json({ success: false, message: 'Valid role is required.' });
+  }
+  const result = await db.query(
+    `UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2 RETURNING ${PUBLIC_COLS}`,
+    [role, req.params.id]
+  );
+  if (result.rows.length === 0) {
+    return res.status(404).json({ success: false, message: 'User not found.' });
+  }
+  res.json({ success: true, message: 'Role updated.', data: result.rows[0] });
+});
+
+/**
+ * Revoke login access (delete user account) - for permissions tab.
+ */
+exports.revokeAccess = asyncHandler(async (req, res) => {
+  if (Number(req.params.id) === req.user.id) {
+    return res.status(400).json({ success: false, message: 'You cannot revoke your own access.' });
+  }
+  const result = await db.query('DELETE FROM users WHERE id = $1 RETURNING id', [req.params.id]);
+  if (result.rows.length === 0) {
+    return res.status(404).json({ success: false, message: 'User not found.' });
+  }
+  res.json({ success: true, message: 'Login access revoked.' });
+});
