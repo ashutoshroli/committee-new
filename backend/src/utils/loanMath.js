@@ -116,10 +116,27 @@ function applyPayment(remainingPrincipal, monthlyRate, paymentAmount) {
   };
 }
 
+/**
+ * Compute the fixed monthly EMI for a reducing-balance loan given a tenure.
+ * Standard amortization formula: EMI = P*r*(1+r)^n / ((1+r)^n - 1)
+ * Falls back to straight-line (P/n) when the rate is 0.
+ * Returns null for invalid inputs.
+ */
+function computeEmi(principal, monthlyRate, tenureMonths) {
+  const P = Number(principal);
+  const n = Number(tenureMonths);
+  const r = Number(monthlyRate) / 100;
+  if (!P || P <= 0 || !n || n <= 0) return null;
+  if (r === 0) return round2(P / n);
+  const factor = Math.pow(1 + r, n);
+  return round2((P * r * factor) / (factor - 1));
+}
+
 module.exports = {
   round2,
   monthlyInterest,
   estimateTenure,
+  computeEmi,
   buildSchedule,
   applyPayment,
 };

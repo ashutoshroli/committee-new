@@ -18,6 +18,8 @@ export default function CreateLoan() {
   const [preview, setPreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [availableFund, setAvailableFund] = useState(null);
+  // Which of EMI / tenure the user last typed in — that one drives the other.
+  const [driver, setDriver] = useState('emi');
 
   useEffect(() => {
     api.get('/members')
@@ -29,22 +31,37 @@ export default function CreateLoan() {
   }, []);
 
   const fetchPreview = useCallback(async () => {
-    const { principal_amount, interest_rate, monthly_payment_amount } = form;
-    if (!principal_amount || !interest_rate || !monthly_payment_amount) {
+    const principal = Number(form.principal_amount);
+    const rate = Number(form.interest_rate);
+    if (!principal || !rate) { setPreview(null); return; }
+
+    const useTenure = driver === 'tenure';
+    if (useTenure ? !form.tenure_months : !form.monthly_payment_amount) {
       setPreview(null);
       return;
     }
+
     try {
-      const res = await api.post('/loans/preview', {
-        principal_amount: Number(principal_amount),
-        interest_rate: Number(interest_rate),
-        monthly_payment_amount: Number(monthly_payment_amount),
-      });
-      setPreview(res.data.data);
+      const body = { principal_amount: principal, interest_rate: rate };
+      if (useTenure) body.tenure_months = Number(form.tenure_months);
+      else body.monthly_payment_amount = Number(form.monthly_payment_amount);
+
+      const res = await api.post('/loans/preview', body);
+      const data = res.data.data;
+      setPreview(data);
+
+      // Auto-fill the opposite field from the computed result.
+      if (useTenure && data.monthly_payment_amount != null) {
+        const v = String(data.monthly_payment_amount);
+        setForm((f) => (f.monthly_payment_amount === v ? f : { ...f, monthly_payment_amount: v }));
+      } else if (!useTenure && data.estimated_tenure_months != null) {
+        const v = String(data.estimated_tenure_months);
+        setForm((f) => (f.tenure_months === v ? f : { ...f, tenure_months: v }));
+      }
     } catch {
       setPreview(null);
     }
-  }, [form.principal_amount, form.interest_rate, form.monthly_payment_amount]);
+  }, [form.principal_amount, form.interest_rate, form.monthly_payment_amount, form.tenure_months, driver]);
 
   useEffect(() => {
     const t = setTimeout(fetchPreview, 400);
@@ -56,6 +73,10 @@ export default function CreateLoan() {
 
   const submit = async (e) => {
     e.preventDefault();
+    if (!form.monthly_payment_amount) {
+      toast.error('Enter an EMI amount or a tenure.');
+      return;
+    }
     if (exceedsFund) {
       toast.error(`Loan amount exceeds the available fund (${inr(availableFund)}).`);
       return;
@@ -115,13 +136,17 @@ export default function CreateLoan() {
               <input type="number" required min="0.01" step="0.01" value={form.interest_rate}
                 onChange={(e) => setForm({ ...form, interest_rate: e.target.value })} className={inputClass} placeholder="2" />
             </Field>
-            <Field label="Monthly Payment Amount (₹) *">
-              <input type="number" required min="1" value={form.monthly_payment_amount}
-                onChange={(e) => setForm({ ...form, monthly_payment_amount: e.target.value })} className={inputClass} placeholder="10000" />
+            <Field label="Monthly EMI Amount (₹) *">
+              <input type="number" min="1" value={form.monthly_payment_amount}
+                onChange={(e) => { setDriver('emi'); setForm({ ...form, monthly_payment_amount: e.target.value }); }}
+                className={inputClass} placeholder="10000" />
+              <p className="mt-1 text-xs text-gray-400">Enter EMI to auto-calculate the tenure.</p>
             </Field>
-            <Field label="Tenure (months) — optional">
+            <Field label="Tenure (months)">
               <input type="number" min="1" value={form.tenure_months}
-                onChange={(e) => setForm({ ...form, tenure_months: e.target.value })} className={inputClass} placeholder="Leave empty for open-ended" />
+                onChange={(e) => { setDriver('tenure'); setForm({ ...form, tenure_months: e.target.value }); }}
+                className={inputClass} placeholder="e.g. 12" />
+              <p className="mt-1 text-xs text-gray-400">Enter tenure to auto-calculate the EMI.</p>
             </Field>
             <Field label="Start Date">
               <input type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} className={inputClass} />
@@ -145,8 +170,8 @@ export default function CreateLoan() {
                 <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{preview.warning}</div>
               )}
               <div className="grid grid-cols-2 gap-4">
+                <Box label="Monthly EMI" value={inr(preview.monthly_payment_amount)} tone="blue" />
                 <Box label="1st Month Interest" value={inr(preview.first_month_interest)} />
-                <Box label="1st Month Principal" value={inr(preview.first_month_principal)} />
               </div>
               {preview.estimated_tenure_months != null && (
                 <>

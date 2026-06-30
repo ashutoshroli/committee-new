@@ -1,6 +1,6 @@
 const db = require('../config/db');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { monthlyInterest, estimateTenure, buildSchedule, applyPayment, round2 } = require('../utils/loanMath');
+const { monthlyInterest, estimateTenure, computeEmi, buildSchedule, applyPayment, round2 } = require('../utils/loanMath');
 const { logActivity } = require('../utils/activityLog');
 
 function periodOf(dateStr) {
@@ -83,20 +83,30 @@ exports.getSchedule = asyncHandler(async (req, res) => {
 
 // ---------- Preview (no DB write) ----------
 exports.preview = asyncHandler(async (req, res) => {
-  const { principal_amount, interest_rate, monthly_payment_amount } = req.body;
+  const { principal_amount, interest_rate, monthly_payment_amount, tenure_months } = req.body;
   const principal = Number(principal_amount);
   const rate = Number(interest_rate);
-  const payment = Number(monthly_payment_amount);
 
-  if (!principal || !rate || !payment) {
-    return res.status(400).json({ success: false, message: 'principal_amount, interest_rate and monthly_payment_amount are required.' });
+  if (!principal || !rate) {
+    return res.status(400).json({ success: false, message: 'principal_amount and interest_rate are required.' });
   }
 
+  const hasPayment = monthly_payment_amount != null && monthly_payment_amount !== '' && Number(monthly_payment_amount) > 0;
+  const hasTenure = tenure_months != null && tenure_months !== '' && Number(tenure_months) > 0;
+
+  if (!hasPayment && !hasTenure) {
+    return res.status(400).json({ success: false, message: 'Provide either monthly_payment_amount or tenure_months.' });
+  }
+
+  // Derive the EMI from tenure when the payment isn't given (tenure -> EMI)
+  let payment = hasPayment ? Number(monthly_payment_amount) : computeEmi(principal, rate, Number(tenure_months));
+
   const firstInterest = monthlyInterest(principal, rate);
-  if (payment <= firstInterest) {
+  if (!payment || payment <= firstInterest) {
     return res.json({
       success: true,
       data: {
+        monthly_payment_amount: payment ? round2(payment) : null,
         first_month_interest: firstInterest,
         first_month_principal: 0,
         estimated_tenure_months: null,
@@ -114,6 +124,7 @@ exports.preview = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: {
+      monthly_payment_amount: round2(payment),
       first_month_interest: firstInterest,
       first_month_principal: round2(payment - firstInterest),
       estimated_tenure_months: tenure,
