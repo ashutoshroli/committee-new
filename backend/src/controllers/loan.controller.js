@@ -229,10 +229,12 @@ exports.update = asyncHandler(async (req, res) => {
         FROM fund_transactions
       `);
       const availableFund = round2(Number(fund.rows[0].total_in) - Number(fund.rows[0].total_out));
-      if (increase > availableFund) {
+      const maxPrincipal = round2(availableFund + principal);
+      if (newPrincipal > maxPrincipal) {
         return res.status(400).json({
           success: false,
-          message: `Increasing the principal by ${increase} exceeds the available fund (${availableFund}).`,
+          message: `Principal (${newPrincipal}) exceeds the maximum allowed (${maxPrincipal}) = available fund (${availableFund}) + amount already disbursed to this loan (${principal}).`,
+          data: { requested: newPrincipal, max_principal: maxPrincipal, available_fund: availableFund },
         });
       }
     }

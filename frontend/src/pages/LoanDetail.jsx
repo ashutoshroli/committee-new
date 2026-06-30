@@ -211,14 +211,25 @@ export default function LoanDetail() {
       {editModal && editForm && (
         <Modal title={`Edit Loan #${loan.id}`} onClose={() => setEditModal(false)}>
           {(() => {
-            const increase = Number(editForm.principal_amount || 0) - Number(loan.principal_amount);
-            const exceeds = availableFund != null && increase > availableFund;
+            const currentPrincipal = Number(loan.principal_amount);
+            // This loan already holds `currentPrincipal` from the pool, so the max it can be
+            // re-set to is the current available fund plus what this loan already took out.
+            const maxPrincipal = availableFund != null ? availableFund + currentPrincipal : null;
+            const entered = Number(editForm.principal_amount || 0);
+            const exceeds = maxPrincipal != null && entered > maxPrincipal;
             return (
           <form onSubmit={saveEdit} className="space-y-3">
             {availableFund != null && (
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between">
-                <span className="text-sm text-blue-700">Total Available Fund</span>
-                <span className="font-bold text-blue-800">{inr(availableFund)}</span>
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-blue-700">Total Available Fund</span>
+                  <span className="font-bold text-blue-800">{inr(availableFund)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-blue-700">Max principal for this loan</span>
+                  <span className="font-bold text-blue-800">{inr(maxPrincipal)}</span>
+                </div>
+                <p className="text-xs text-blue-500">Available fund + ₹{currentPrincipal.toLocaleString('en-IN')} already disbursed to this loan.</p>
               </div>
             )}
             <Field label="Principal Amount (₹) *">
@@ -227,7 +238,7 @@ export default function LoanDetail() {
                 className={`${inputClass} ${exceeds ? 'border-red-400 focus:ring-red-400' : ''}`} />
               {exceeds ? (
                 <p className="mt-1 text-xs text-red-600">
-                  Increasing principal by {inr(increase)} exceeds the available fund ({inr(availableFund)}).
+                  Principal exceeds the maximum allowed ({inr(maxPrincipal)}).
                 </p>
               ) : (
                 <p className="mt-1 text-xs text-gray-400">Remaining is re-derived as principal minus principal already paid.</p>
