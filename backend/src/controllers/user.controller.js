@@ -160,3 +160,24 @@ exports.revokeAccess = asyncHandler(async (req, res) => {
   await logActivity(req, 'revoke_access', 'user', Number(req.params.id), `Revoked login access for user #${req.params.id}`);
   res.json({ success: true, message: 'Login access revoked.' });
 });
+
+/**
+ * Reset a user's password (superadmin only - enforced at route level).
+ */
+exports.resetPassword = asyncHandler(async (req, res) => {
+  const { password } = req.body;
+  if (!password || String(password).length < 6) {
+    return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
+  }
+
+  const target = await db.query('SELECT id, name FROM users WHERE id = $1', [req.params.id]);
+  if (target.rows.length === 0) {
+    return res.status(404).json({ success: false, message: 'User not found.' });
+  }
+
+  const hash = await bcrypt.hash(password, 10);
+  await db.query('UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2', [hash, req.params.id]);
+
+  await logActivity(req, 'update', 'user', Number(req.params.id), `Reset password for "${target.rows[0].name}"`);
+  res.json({ success: true, message: 'Password reset successfully.' });
+});

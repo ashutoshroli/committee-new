@@ -14,5 +14,6 @@ router.delete('/:id', authorize('superadmin'), ctrl.remove);
 router.post('/grant-access', authorize('superadmin', 'admin'), ctrl.grantAccess);
 router.patch('/:id/role', authorize('superadmin', 'admin'), ctrl.updateRole);
 router.delete('/:id/access', authorize('superadmin', 'admin'), ctrl.revokeAccess);
+router.patch('/:id/reset-password', authorize('superadmin'), ctrl.resetPassword);
 
 module.exports = router;

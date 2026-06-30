@@ -18,6 +18,7 @@ export default function LoanDetail() {
   const [modal, setModal] = useState(false);
   const [editModal, setEditModal] = useState(false);
   const [editForm, setEditForm] = useState(null);
+  const [availableFund, setAvailableFund] = useState(null);
   const [form, setForm] = useState({ payment_amount: '', payment_date: new Date().toISOString().split('T')[0], remarks: '' });
 
   const load = useCallback(() => {
@@ -68,6 +69,9 @@ export default function LoanDetail() {
       remarks: loan.remarks || '',
     });
     setEditModal(true);
+    api.get('/dashboard/stats')
+      .then((res) => setAvailableFund(res.data.data.fund.available))
+      .catch(() => setAvailableFund(null));
   };
 
   const saveEdit = async (e) => {
@@ -206,11 +210,28 @@ export default function LoanDetail() {
       )}
       {editModal && editForm && (
         <Modal title={`Edit Loan #${loan.id}`} onClose={() => setEditModal(false)}>
+          {(() => {
+            const increase = Number(editForm.principal_amount || 0) - Number(loan.principal_amount);
+            const exceeds = availableFund != null && increase > availableFund;
+            return (
           <form onSubmit={saveEdit} className="space-y-3">
+            {availableFund != null && (
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between">
+                <span className="text-sm text-blue-700">Total Available Fund</span>
+                <span className="font-bold text-blue-800">{inr(availableFund)}</span>
+              </div>
+            )}
             <Field label="Principal Amount (₹) *">
               <input type="number" required min="1" step="0.01" value={editForm.principal_amount}
-                onChange={(e) => setEditForm({ ...editForm, principal_amount: e.target.value })} className={inputClass} />
-              <p className="mt-1 text-xs text-gray-400">Remaining is re-derived as principal minus principal already paid.</p>
+                onChange={(e) => setEditForm({ ...editForm, principal_amount: e.target.value })}
+                className={`${inputClass} ${exceeds ? 'border-red-400 focus:ring-red-400' : ''}`} />
+              {exceeds ? (
+                <p className="mt-1 text-xs text-red-600">
+                  Increasing principal by {inr(increase)} exceeds the available fund ({inr(availableFund)}).
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-gray-400">Remaining is re-derived as principal minus principal already paid.</p>
+              )}
             </Field>
             <Field label="Monthly Interest Rate (%) *">
               <input type="number" required min="0.01" step="0.01" value={editForm.interest_rate}
@@ -239,10 +260,12 @@ export default function LoanDetail() {
               <textarea value={editForm.remarks} onChange={(e) => setEditForm({ ...editForm, remarks: e.target.value })} className={inputClass} rows={2} />
             </Field>
             <div className="flex gap-3 pt-2">
-              <button type="submit" className="flex-1 bg-brand-600 text-white py-2 rounded-lg hover:bg-brand-700">Save Changes</button>
+              <button type="submit" disabled={exceeds} className="flex-1 bg-brand-600 text-white py-2 rounded-lg hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed">Save Changes</button>
               <button type="button" onClick={() => setEditModal(false)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300">Cancel</button>
             </div>
           </form>
+            );
+          })()}
         </Modal>
       )}
     </div>

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { FiEdit2, FiTrash2, FiShield, FiKey, FiUserCheck } from 'react-icons/fi';
+import { FiEdit2, FiTrash2, FiShield, FiKey, FiUserCheck, FiLock } from 'react-icons/fi';
 import api from '../lib/api';
 import { fmtDate } from '../lib/format';
+import { useAuth } from '../context/AuthContext';
 import { Card, PageTitle, Spinner, Badge, Modal, Field, inputClass } from '../components/ui';
 
 // Super Admin is intentionally NOT assignable from the UI.
@@ -37,10 +38,14 @@ export default function Users() {
 
 /* ---------------- App Users Tab (list only, no add) ---------------- */
 function UsersTab() {
+  const { user: currentUser } = useAuth();
+  const isSuperAdmin = currentUser?.role === 'superadmin';
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: '', email: '', phone: '', role: 'manager' });
+  const [resetting, setResetting] = useState(null); // user object
+  const [newPassword, setNewPassword] = useState('');
 
   const load = () => {
     setLoading(true);
@@ -65,6 +70,18 @@ function UsersTab() {
       load();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Operation failed');
+    }
+  };
+
+  const submitReset = async (e) => {
+    e.preventDefault();
+    try {
+      await api.patch(`/users/${resetting.id}/reset-password`, { password: newPassword });
+      toast.success('Password reset successfully');
+      setResetting(null);
+      setNewPassword('');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Reset failed');
     }
   };
 
@@ -98,8 +115,11 @@ function UsersTab() {
                   <td className="px-6 py-4 text-sm text-gray-500">{fmtDate(u.created_at)}</td>
                   <td className="px-6 py-4">
                     <div className="flex justify-end gap-3 text-gray-500">
-                      <button onClick={() => openEdit(u)} className="hover:text-yellow-600"><FiEdit2 /></button>
-                      <button onClick={() => remove(u.id)} className="hover:text-red-600"><FiTrash2 /></button>
+                      <button onClick={() => openEdit(u)} title="Edit" className="hover:text-yellow-600"><FiEdit2 /></button>
+                      {isSuperAdmin && (
+                        <button onClick={() => { setResetting(u); setNewPassword(''); }} title="Reset password" className="hover:text-blue-600"><FiLock /></button>
+                      )}
+                      <button onClick={() => remove(u.id)} title="Delete" className="hover:text-red-600"><FiTrash2 /></button>
                     </div>
                   </td>
                 </tr>
@@ -139,6 +159,24 @@ function UsersTab() {
             <div className="flex gap-3 pt-2">
               <button type="submit" className="flex-1 bg-brand-600 text-white py-2 rounded-lg hover:bg-brand-700">Update</button>
               <button type="button" onClick={() => setEditing(null)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300">Cancel</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {resetting && (
+        <Modal title={`Reset Password - ${resetting.name}`} onClose={() => setResetting(null)}>
+          <form onSubmit={submitReset} className="space-y-3">
+            <p className="text-sm text-gray-500">
+              Set a new login password for <span className="font-medium">{resetting.email}</span>.
+            </p>
+            <Field label="New Password *">
+              <input type="password" required minLength={6} value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)} className={inputClass} placeholder="At least 6 characters" />
+            </Field>
+            <div className="flex gap-3 pt-2">
+              <button type="submit" className="flex-1 bg-brand-600 text-white py-2 rounded-lg hover:bg-brand-700">Reset Password</button>
+              <button type="button" onClick={() => setResetting(null)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300">Cancel</button>
             </div>
           </form>
         </Modal>
