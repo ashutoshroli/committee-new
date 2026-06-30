@@ -1,16 +1,23 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FiArrowLeft } from 'react-icons/fi';
+import { FiArrowLeft, FiEdit2, FiTrash2 } from 'react-icons/fi';
 import api from '../lib/api';
 import { inr, fmtDate } from '../lib/format';
+import { useAuth } from '../context/AuthContext';
 import { Card, Spinner, Empty, Badge, Modal, Field, inputClass } from '../components/ui';
 
 export default function LoanDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'superadmin';
+  const canEdit = user?.role === 'superadmin' || user?.role === 'admin';
   const [loan, setLoan] = useState(null);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
+  const [editModal, setEditModal] = useState(false);
+  const [editForm, setEditForm] = useState(null);
   const [form, setForm] = useState({ payment_amount: '', payment_date: new Date().toISOString().split('T')[0], remarks: '' });
 
   const load = useCallback(() => {
@@ -50,6 +57,50 @@ export default function LoanDetail() {
     }
   };
 
+  const openEdit = () => {
+    setEditForm({
+      principal_amount: loan.principal_amount,
+      interest_rate: loan.interest_rate,
+      monthly_payment_amount: loan.monthly_payment_amount,
+      tenure_months: loan.tenure_months || '',
+      start_date: loan.start_date ? loan.start_date.split('T')[0] : '',
+      status: loan.status,
+      remarks: loan.remarks || '',
+    });
+    setEditModal(true);
+  };
+
+  const saveEdit = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await api.put(`/loans/${id}`, {
+        principal_amount: Number(editForm.principal_amount),
+        interest_rate: Number(editForm.interest_rate),
+        monthly_payment_amount: Number(editForm.monthly_payment_amount),
+        tenure_months: editForm.tenure_months ? Number(editForm.tenure_months) : null,
+        start_date: editForm.start_date,
+        status: editForm.status,
+        remarks: editForm.remarks,
+      });
+      toast.success(res.data.message);
+      setEditModal(false);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Update failed');
+    }
+  };
+
+  const removeLoan = async () => {
+    if (!window.confirm('Delete this loan permanently? This also reverses its fund entries and removes all its payments. This cannot be undone.')) return;
+    try {
+      const res = await api.delete(`/loans/${id}`);
+      toast.success(res.data.message);
+      navigate('/loans');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Delete failed');
+    }
+  };
+
   if (loading) return <Spinner />;
   if (!loan) return <Empty>Loan not found</Empty>;
 
@@ -65,7 +116,15 @@ export default function LoanDetail() {
             <h1 className="text-2xl font-bold text-gray-800">{loan.member_name}</h1>
             <p className="text-gray-500">Loan #{loan.id} · started {fmtDate(loan.start_date)}</p>
           </div>
-          <Badge value={loan.status} />
+          <div className="flex items-center gap-3">
+            <Badge value={loan.status} />
+            {canEdit && (
+              <button onClick={openEdit} title="Edit loan" className="text-gray-500 hover:text-yellow-600"><FiEdit2 /></button>
+            )}
+            {isSuperAdmin && (
+              <button onClick={removeLoan} title="Delete loan" className="text-gray-500 hover:text-red-600"><FiTrash2 /></button>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
@@ -141,6 +200,47 @@ export default function LoanDetail() {
             <div className="flex gap-3 pt-2">
               <button type="submit" className="flex-1 bg-brand-600 text-white py-2 rounded-lg hover:bg-brand-700">Submit</button>
               <button type="button" onClick={() => setModal(false)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300">Cancel</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {editModal && editForm && (
+        <Modal title={`Edit Loan #${loan.id}`} onClose={() => setEditModal(false)}>
+          <form onSubmit={saveEdit} className="space-y-3">
+            <Field label="Principal Amount (₹) *">
+              <input type="number" required min="1" step="0.01" value={editForm.principal_amount}
+                onChange={(e) => setEditForm({ ...editForm, principal_amount: e.target.value })} className={inputClass} />
+              <p className="mt-1 text-xs text-gray-400">Remaining is re-derived as principal minus principal already paid.</p>
+            </Field>
+            <Field label="Monthly Interest Rate (%) *">
+              <input type="number" required min="0.01" step="0.01" value={editForm.interest_rate}
+                onChange={(e) => setEditForm({ ...editForm, interest_rate: e.target.value })} className={inputClass} />
+            </Field>
+            <Field label="Monthly Payment Amount (₹) *">
+              <input type="number" required min="1" step="0.01" value={editForm.monthly_payment_amount}
+                onChange={(e) => setEditForm({ ...editForm, monthly_payment_amount: e.target.value })} className={inputClass} />
+            </Field>
+            <Field label="Tenure (months) — optional">
+              <input type="number" min="1" value={editForm.tenure_months}
+                onChange={(e) => setEditForm({ ...editForm, tenure_months: e.target.value })} className={inputClass} placeholder="Open-ended if empty" />
+            </Field>
+            <Field label="Start Date">
+              <input type="date" value={editForm.start_date}
+                onChange={(e) => setEditForm({ ...editForm, start_date: e.target.value })} className={inputClass} />
+            </Field>
+            <Field label="Status">
+              <select value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })} className={inputClass}>
+                <option value="active">Active</option>
+                <option value="closed">Closed</option>
+                <option value="foreclosed">Foreclosed</option>
+              </select>
+            </Field>
+            <Field label="Remarks">
+              <textarea value={editForm.remarks} onChange={(e) => setEditForm({ ...editForm, remarks: e.target.value })} className={inputClass} rows={2} />
+            </Field>
+            <div className="flex gap-3 pt-2">
+              <button type="submit" className="flex-1 bg-brand-600 text-white py-2 rounded-lg hover:bg-brand-700">Save Changes</button>
+              <button type="button" onClick={() => setEditModal(false)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300">Cancel</button>
             </div>
           </form>
         </Modal>

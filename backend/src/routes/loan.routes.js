@@ -10,6 +10,8 @@ router.get('/:id', ctrl.getById);
 router.get('/:id/schedule', ctrl.getSchedule);
 router.get('/:id/payments', ctrl.getPayments);
 router.post('/', authorize('superadmin', 'admin', 'subadmin'), ctrl.create);
+router.put('/:id', authorize('superadmin', 'admin'), ctrl.update);
+router.delete('/:id', authorize('superadmin'), ctrl.remove);
 router.post('/:id/payment', authorize('superadmin', 'admin', 'subadmin', 'manager'), ctrl.makePayment);
 router.post('/:id/foreclose', authorize('superadmin', 'admin'), ctrl.foreclose);
 router.post('/process-monthly-interest', authorize('superadmin', 'admin'), ctrl.processMonthlyInterest);

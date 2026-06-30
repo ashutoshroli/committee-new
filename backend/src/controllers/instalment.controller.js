@@ -143,3 +143,25 @@ exports.getMonthlySummary = asyncHandler(async (req, res) => {
   );
   res.json({ success: true, data: result.rows[0] });
 });
+
+// ---------- Delete (superadmin) ----------
+exports.remove = asyncHandler(async (req, res) => {
+  const found = await db.query('SELECT * FROM instalments WHERE id = $1', [req.params.id]);
+  if (found.rows.length === 0) {
+    return res.status(404).json({ success: false, message: 'Instalment not found.' });
+  }
+  const inst = found.rows[0];
+
+  // Reverse the fund entries recorded for this instalment (payment + any late fine)
+  await db.query(
+    "DELETE FROM fund_transactions WHERE reference_id = $1 AND transaction_type IN ('instalment_received','fine_received')",
+    [inst.id]
+  );
+
+  await db.query('DELETE FROM instalments WHERE id = $1', [inst.id]);
+
+  await logActivity(req, 'delete', 'instalment', inst.id,
+    `Deleted instalment #${inst.id} (${inst.month}/${inst.year}) and reversed its fund entries`);
+
+  res.json({ success: true, message: 'Instalment deleted and fund entries reversed.' });
+});

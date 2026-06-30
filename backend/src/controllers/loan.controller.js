@@ -193,6 +193,125 @@ exports.create = asyncHandler(async (req, res) => {
   });
 });
 
+// ---------- Update (superadmin/admin) ----------
+exports.update = asyncHandler(async (req, res) => {
+  const { principal_amount, interest_rate, monthly_payment_amount, tenure_months, start_date, status, remarks } = req.body;
+
+  const loanRes = await db.query('SELECT * FROM loans WHERE id = $1', [req.params.id]);
+  if (loanRes.rows.length === 0) {
+    return res.status(404).json({ success: false, message: 'Loan not found.' });
+  }
+  const loan = loanRes.rows[0];
+
+  const rate = interest_rate != null ? Number(interest_rate) : Number(loan.interest_rate);
+  const payment = monthly_payment_amount != null ? Number(monthly_payment_amount) : Number(loan.monthly_payment_amount);
+  const principalPaid = Number(loan.total_principal_paid);
+
+  // Handle principal change (re-derives remaining principal and the disbursed fund entry)
+  let principal = Number(loan.principal_amount);
+  let remaining = Number(loan.remaining_principal);
+  if (principal_amount != null && Number(principal_amount) !== principal) {
+    const newPrincipal = Number(principal_amount);
+    if (newPrincipal < principalPaid) {
+      return res.status(400).json({
+        success: false,
+        message: `New principal (${newPrincipal}) cannot be less than principal already paid (${principalPaid}).`,
+      });
+    }
+    // If principal increases, the extra disbursal must fit in the available fund
+    const increase = newPrincipal - principal;
+    if (increase > 0) {
+      const fund = await db.query(`
+        SELECT
+          COALESCE(SUM(amount) FILTER (WHERE transaction_type IN
+            ('instalment_received','loan_payment_received','fine_received')), 0) AS total_in,
+          COALESCE(SUM(amount) FILTER (WHERE transaction_type = 'loan_disbursed'), 0) AS total_out
+        FROM fund_transactions
+      `);
+      const availableFund = round2(Number(fund.rows[0].total_in) - Number(fund.rows[0].total_out));
+      if (increase > availableFund) {
+        return res.status(400).json({
+          success: false,
+          message: `Increasing the principal by ${increase} exceeds the available fund (${availableFund}).`,
+        });
+      }
+    }
+    principal = newPrincipal;
+    remaining = round2(newPrincipal - principalPaid);
+    // Keep the disbursed fund transaction in sync
+    await db.query(
+      `UPDATE fund_transactions SET amount = $1
+       WHERE transaction_type = 'loan_disbursed' AND reference_id = $2`,
+      [principal, loan.id]
+    );
+  }
+
+  // Recompute end date from (possibly new) tenure and start date
+  const startStr = start_date || loan.start_date;
+  const tenure = tenure_months != null
+    ? (tenure_months ? Number(tenure_months) : null)
+    : loan.tenure_months;
+  let endDate = null;
+  if (tenure) {
+    const e = new Date(startStr);
+    e.setMonth(e.getMonth() + Number(tenure));
+    endDate = e.toISOString().split('T')[0];
+  }
+
+  const nextStatus = status && ['active', 'closed', 'foreclosed'].includes(status) ? status : loan.status;
+
+  const result = await db.query(
+    `UPDATE loans SET
+        principal_amount = $1,
+        remaining_principal = $2,
+        interest_rate = $3,
+        monthly_payment_amount = $4,
+        tenure_months = $5,
+        start_date = $6,
+        end_date = $7,
+        status = $8,
+        remarks = COALESCE($9, remarks),
+        updated_at = NOW()
+     WHERE id = $10 RETURNING *`,
+    [principal, remaining, rate, payment, tenure, startStr, endDate, nextStatus, remarks ?? null, loan.id]
+  );
+
+  await logActivity(req, 'update', 'loan', loan.id, `Updated loan #${loan.id} (principal ${principal}, rate ${rate}%)`);
+
+  res.json({ success: true, message: 'Loan updated successfully.', data: result.rows[0] });
+});
+
+// ---------- Delete (superadmin) ----------
+exports.remove = asyncHandler(async (req, res) => {
+  const loanRes = await db.query('SELECT * FROM loans WHERE id = $1', [req.params.id]);
+  if (loanRes.rows.length === 0) {
+    return res.status(404).json({ success: false, message: 'Loan not found.' });
+  }
+
+  // Collect payment ids so we can reverse their fund transactions
+  const payments = await db.query('SELECT id FROM loan_payments WHERE loan_id = $1', [req.params.id]);
+  const paymentIds = payments.rows.map((p) => p.id);
+
+  // Remove fund entries tied to this loan: the disbursal and every repayment received
+  await db.query(
+    "DELETE FROM fund_transactions WHERE transaction_type = 'loan_disbursed' AND reference_id = $1",
+    [req.params.id]
+  );
+  if (paymentIds.length > 0) {
+    await db.query(
+      "DELETE FROM fund_transactions WHERE transaction_type = 'loan_payment_received' AND reference_id = ANY($1::int[])",
+      [paymentIds]
+    );
+  }
+
+  // Deleting the loan cascades to loan_payments and loan_interest_log (ON DELETE CASCADE)
+  await db.query('DELETE FROM loans WHERE id = $1', [req.params.id]);
+
+  await logActivity(req, 'delete', 'loan', Number(req.params.id), `Deleted loan #${req.params.id} and reversed its fund entries`);
+
+  res.json({ success: true, message: 'Loan deleted and fund entries reversed.' });
+});
+
 // ---------- Make payment ----------
 exports.makePayment = asyncHandler(async (req, res) => {
   const { payment_amount, payment_date, remarks } = req.body;

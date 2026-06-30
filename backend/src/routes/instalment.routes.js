@@ -9,5 +9,6 @@ router.get('/summary/:month/:year', ctrl.getMonthlySummary);
 router.get('/member/:memberId', ctrl.getByMember);
 router.post('/generate', authorize('superadmin', 'admin'), ctrl.generateMonthly);
 router.post('/:id/pay', authorize('superadmin', 'admin', 'subadmin', 'manager'), ctrl.recordPayment);
+router.delete('/:id', authorize('superadmin'), ctrl.remove);
 
 module.exports = router;

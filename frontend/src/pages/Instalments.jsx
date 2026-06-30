@@ -1,12 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { FiRefreshCw } from 'react-icons/fi';
+import { FiRefreshCw, FiTrash2 } from 'react-icons/fi';
 import api from '../lib/api';
 import { inr, fmtDate, MONTHS } from '../lib/format';
+import { useAuth } from '../context/AuthContext';
 import { Card, PageTitle, Spinner, Badge, Modal, Field, inputClass } from '../components/ui';
 
 export default function Instalments() {
   const now = new Date();
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'superadmin';
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
   const [rows, setRows] = useState([]);
@@ -54,6 +57,17 @@ export default function Instalments() {
   };
 
   const count = (s) => rows.filter((r) => r.status === s).length;
+
+  const removeInstalment = async (inst) => {
+    if (!window.confirm(`Delete ${inst.member_name}'s instalment for ${inst.month}/${inst.year}? This reverses any recorded payment from the fund.`)) return;
+    try {
+      const res = await api.delete(`/instalments/${inst.id}`);
+      toast.success(res.data.message);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Delete failed');
+    }
+  };
 
   return (
     <div>
@@ -104,9 +118,14 @@ export default function Instalments() {
                     <td className="px-4 py-3 text-red-600">{Number(r.late_fine) > 0 ? inr(r.late_fine) : '-'}</td>
                     <td className="px-4 py-3"><Badge value={r.status} /></td>
                     <td className="px-4 py-3 text-right">
-                      {r.status !== 'paid' && (
-                        <button onClick={() => openPay(r)} className="text-brand-600 hover:text-brand-800 text-sm font-medium">Pay</button>
-                      )}
+                      <div className="flex items-center justify-end gap-3">
+                        {r.status !== 'paid' && (
+                          <button onClick={() => openPay(r)} className="text-brand-600 hover:text-brand-800 text-sm font-medium">Pay</button>
+                        )}
+                        {isSuperAdmin && (
+                          <button onClick={() => removeInstalment(r)} title="Delete instalment" className="text-gray-400 hover:text-red-600"><FiTrash2 size={15} /></button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
