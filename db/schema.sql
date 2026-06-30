@@ -148,6 +148,21 @@ CREATE TABLE fund_transactions (
 );
 
 -- =====================================================================
+-- 9. ACTIVITY LOGS  (audit trail - viewable only by superadmin)
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id           SERIAL PRIMARY KEY,
+    user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    user_name    VARCHAR(255),
+    user_role    VARCHAR(50),
+    action       VARCHAR(50)  NOT NULL,   -- create | update | delete | login | payment | etc.
+    entity_type  VARCHAR(50)  NOT NULL,   -- loan | member | user | instalment | settings | auth
+    entity_id    INTEGER,
+    description  TEXT,
+    created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- =====================================================================
 -- INDEXES
 -- =====================================================================
 CREATE INDEX idx_instalments_member       ON instalments(member_id);
@@ -160,6 +175,8 @@ CREATE INDEX idx_loan_payments_member      ON loan_payments(member_id);
 CREATE INDEX idx_loan_interest_log_loan    ON loan_interest_log(loan_id);
 CREATE INDEX idx_fund_transactions_date    ON fund_transactions(transaction_date);
 CREATE INDEX idx_fund_transactions_type    ON fund_transactions(transaction_type);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_created ON activity_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_entity  ON activity_logs(entity_type);
 
 -- =====================================================================
 -- SEED DATA

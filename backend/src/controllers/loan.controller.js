@@ -1,6 +1,7 @@
 const db = require('../config/db');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { monthlyInterest, estimateTenure, buildSchedule, applyPayment, round2 } = require('../utils/loanMath');
+const { logActivity } = require('../utils/activityLog');
 
 function periodOf(dateStr) {
   const d = dateStr ? new Date(dateStr) : new Date();
@@ -183,6 +184,8 @@ exports.create = asyncHandler(async (req, res) => {
     [principal, result.rows[0].id, `Loan disbursed to ${member.rows[0].name}`, startStr]
   );
 
+  await logActivity(req, 'create', 'loan', result.rows[0].id, `Created loan of ${principal} for ${member.rows[0].name}`);
+
   res.status(201).json({
     success: true,
     message: 'Loan created successfully.',
@@ -241,6 +244,9 @@ exports.makePayment = asyncHandler(async (req, res) => {
     [loan.id, calc.principalBefore, calc.interest, calc.unpaidInterest > 0, month, year]
   );
 
+  await logActivity(req, 'payment', 'loan', loan.id,
+    `Recorded ${calc.paymentType} payment of ${Number(payment_amount)} on loan #${loan.id}${newStatus === 'closed' ? ' (loan closed)' : ''}`);
+
   res.json({
     success: true,
     message: newStatus === 'closed' ? 'Payment successful. Loan is now closed!' : 'Payment recorded successfully.',
@@ -294,6 +300,8 @@ exports.foreclose = asyncHandler(async (req, res) => {
      VALUES ('loan_payment_received', $1, $2, 'Loan foreclosure', $3)`,
     [amount, payRow.rows[0].id, date]
   );
+
+  await logActivity(req, 'foreclose', 'loan', loan.id, `Foreclosed loan #${loan.id} for amount ${amount}`);
 
   res.json({
     success: true,

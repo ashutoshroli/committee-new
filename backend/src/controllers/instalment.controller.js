@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { logActivity } = require('../utils/activityLog');
 
 exports.getAll = asyncHandler(async (req, res) => {
   const { month, year, status } = req.query;
@@ -61,6 +62,7 @@ exports.generateMonthly = asyncHandler(async (req, res) => {
     message: `Generated ${count} instalments for ${month}/${year}.`,
     data: { count, month, year, amount: Number(monthly_instalment) },
   });
+  await logActivity(req, 'generate', 'instalment', null, `Generated ${count} instalments for ${month}/${year}`);
 });
 
 exports.recordPayment = asyncHandler(async (req, res) => {
@@ -120,6 +122,8 @@ exports.recordPayment = asyncHandler(async (req, res) => {
     message: 'Payment recorded.',
     data: { instalment: updated.rows[0], late_fine_charged: lateFine, status },
   });
+  await logActivity(req, 'payment', 'instalment', inst.id,
+    `Recorded instalment payment of ${paid_amount} for ${inst.month}/${inst.year}${lateFine > 0 ? ` (late fine ${lateFine})` : ''}`);
 });
 
 exports.getMonthlySummary = asyncHandler(async (req, res) => {

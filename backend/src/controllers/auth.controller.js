@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../config/db');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { logActivity } = require('../utils/activityLog');
 
 function signToken(user) {
   return jwt.sign(
@@ -40,6 +41,7 @@ exports.login = asyncHandler(async (req, res) => {
       user: { id: user.id, name: user.name, email: user.email, role: user.role },
     },
   });
+  await logActivity({ user }, 'login', 'auth', user.id, `${user.name} logged in`);
 });
 
 exports.register = asyncHandler(async (req, res) => {
@@ -85,5 +87,6 @@ exports.changePassword = asyncHandler(async (req, res) => {
 
   const hash = await bcrypt.hash(newPassword, 10);
   await db.query('UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2', [hash, req.user.id]);
+  await logActivity(req, 'update', 'auth', req.user.id, `${req.user.name} changed password`);
   res.json({ success: true, message: 'Password changed successfully.' });
 });

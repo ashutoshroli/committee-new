@@ -12,6 +12,7 @@ import LoanDetail from './pages/LoanDetail';
 import Instalments from './pages/Instalments';
 import Settings from './pages/Settings';
 import Users from './pages/Users';
+import ActivityLog from './pages/ActivityLog';
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -24,6 +25,12 @@ function Protected({ children }) {
 function AdminOnly({ children }) {
   const { user } = useAuth();
   if (user && (user.role === 'superadmin' || user.role === 'admin')) return children;
+  return <Navigate to="/" replace />;
+}
+
+function SuperAdminOnly({ children }) {
+  const { user } = useAuth();
+  if (user && user.role === 'superadmin') return children;
   return <Navigate to="/" replace />;
 }
 
@@ -43,6 +50,7 @@ export default function App() {
             <Route path="instalments" element={<Instalments />} />
             <Route path="settings" element={<Settings />} />
             <Route path="users" element={<AdminOnly><Users /></AdminOnly>} />
+            <Route path="activity-log" element={<SuperAdminOnly><ActivityLog /></SuperAdminOnly>} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

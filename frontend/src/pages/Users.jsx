@@ -5,8 +5,9 @@ import api from '../lib/api';
 import { fmtDate } from '../lib/format';
 import { Card, PageTitle, Spinner, Badge, Modal, Field, inputClass } from '../components/ui';
 
+// Super Admin is intentionally NOT assignable from the UI.
+// Only the seeded super admin holds that role; others can be admin/subadmin/manager.
 const ROLES = [
-  { value: 'superadmin', label: 'Super Admin' },
   { value: 'admin', label: 'Admin' },
   { value: 'subadmin', label: 'Sub Admin' },
   { value: 'manager', label: 'Manager' },
@@ -124,9 +125,16 @@ function UsersTab() {
               <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className={inputClass} />
             </Field>
             <Field label="Login Role">
-              <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className={inputClass}>
-                {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
+              {editing?.role === 'superadmin' ? (
+                <div className="flex items-center gap-2">
+                  <Badge value="superadmin" />
+                  <span className="text-xs text-gray-400">Super Admin role can't be changed.</span>
+                </div>
+              ) : (
+                <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className={inputClass}>
+                  {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              )}
             </Field>
             <div className="flex gap-3 pt-2">
               <button type="submit" className="flex-1 bg-brand-600 text-white py-2 rounded-lg hover:bg-brand-700">Update</button>
@@ -242,13 +250,17 @@ function PermissionsTab() {
                     </td>
                     <td className="px-6 py-4">
                       {user ? (
-                        <select
-                          value={user.role}
-                          onChange={(e) => changeRole(user, e.target.value)}
-                          className={`${inputClass} py-1 text-sm`}
-                        >
-                          {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-                        </select>
+                        user.role === 'superadmin' ? (
+                          <Badge value="superadmin" />
+                        ) : (
+                          <select
+                            value={user.role}
+                            onChange={(e) => changeRole(user, e.target.value)}
+                            className={`${inputClass} py-1 text-sm`}
+                          >
+                            {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                          </select>
+                        )
                       ) : (
                         <span className="text-gray-300">—</span>
                       )}
@@ -256,12 +268,16 @@ function PermissionsTab() {
                     <td className="px-6 py-4">
                       <div className="flex justify-end gap-2">
                         {user ? (
-                          <button
-                            onClick={() => revoke(user)}
-                            className="inline-flex items-center gap-1 text-red-600 hover:text-red-700 text-sm border border-red-200 px-3 py-1 rounded-lg"
-                          >
-                            <FiTrash2 /> Revoke
-                          </button>
+                          user.role === 'superadmin' ? (
+                            <span className="text-xs text-gray-400">Protected</span>
+                          ) : (
+                            <button
+                              onClick={() => revoke(user)}
+                              className="inline-flex items-center gap-1 text-red-600 hover:text-red-700 text-sm border border-red-200 px-3 py-1 rounded-lg"
+                            >
+                              <FiTrash2 /> Revoke
+                            </button>
+                          )
                         ) : (
                           <button
                             onClick={() => openGrant(m)}

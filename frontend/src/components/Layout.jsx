@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
-  FiHome, FiUsers, FiDollarSign, FiCalendar, FiSettings, FiUserCheck, FiLogOut, FiMenu, FiX,
+  FiHome, FiUsers, FiDollarSign, FiCalendar, FiSettings, FiUserCheck, FiActivity, FiLogOut, FiMenu, FiX,
 } from 'react-icons/fi';
 
 export default function Layout() {
@@ -24,6 +24,9 @@ export default function Layout() {
   ];
   if (user?.role === 'superadmin' || user?.role === 'admin') {
     navItems.push({ to: '/users', icon: FiUserCheck, label: 'Users' });
+  }
+  if (user?.role === 'superadmin') {
+    navItems.push({ to: '/activity-log', icon: FiActivity, label: 'Activity Log' });
   }
 
   const SidebarContent = (

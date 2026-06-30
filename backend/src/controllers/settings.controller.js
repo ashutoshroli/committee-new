@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { logActivity } = require('../utils/activityLog');
 
 exports.get = asyncHandler(async (req, res) => {
   const result = await db.query('SELECT * FROM committee_settings ORDER BY id LIMIT 1');
@@ -36,5 +37,6 @@ exports.update = asyncHandler(async (req, res) => {
      late_fine_per_day, late_fine_per_month, grace_period_days, payment_due_day,
      existing.rows[0].id]
   );
+  await logActivity(req, 'update', 'settings', existing.rows[0].id, 'Updated committee settings');
   res.json({ success: true, message: 'Settings updated.', data: result.rows[0] });
 });

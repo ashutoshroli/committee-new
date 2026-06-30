@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { logActivity } = require('../utils/activityLog');
 
 exports.getAll = asyncHandler(async (req, res) => {
   const result = await db.query('SELECT * FROM members ORDER BY name ASC');
@@ -39,6 +40,7 @@ exports.create = asyncHandler(async (req, res) => {
      VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
     [name, phone || null, email || null, address || null, committee_role || 'member', join_date || new Date()]
   );
+  await logActivity(req, 'create', 'member', result.rows[0].id, `Added member "${result.rows[0].name}"`);
   res.status(201).json({ success: true, message: 'Member added.', data: result.rows[0] });
 });
 
@@ -59,6 +61,7 @@ exports.update = asyncHandler(async (req, res) => {
   if (result.rows.length === 0) {
     return res.status(404).json({ success: false, message: 'Member not found.' });
   }
+  await logActivity(req, 'update', 'member', result.rows[0].id, `Updated member "${result.rows[0].name}"`);
   res.json({ success: true, message: 'Member updated.', data: result.rows[0] });
 });
 
@@ -77,5 +80,6 @@ exports.remove = asyncHandler(async (req, res) => {
   if (result.rows.length === 0) {
     return res.status(404).json({ success: false, message: 'Member not found.' });
   }
+  await logActivity(req, 'delete', 'member', Number(req.params.id), `Deleted member #${req.params.id}`);
   res.json({ success: true, message: 'Member deleted.' });
 });
