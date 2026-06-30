@@ -17,10 +17,14 @@ export default function CreateLoan() {
   const [form, setForm] = useState(EMPTY);
   const [preview, setPreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [availableFund, setAvailableFund] = useState(null);
 
   useEffect(() => {
     api.get('/members')
       .then((res) => setMembers(res.data.data.filter((m) => m.is_active)))
+      .catch(() => {});
+    api.get('/dashboard/stats')
+      .then((res) => setAvailableFund(res.data.data.fund.available))
       .catch(() => {});
   }, []);
 
@@ -47,8 +51,15 @@ export default function CreateLoan() {
     return () => clearTimeout(t);
   }, [fetchPreview]);
 
+  const exceedsFund =
+    availableFund != null && form.principal_amount !== '' && Number(form.principal_amount) > availableFund;
+
   const submit = async (e) => {
     e.preventDefault();
+    if (exceedsFund) {
+      toast.error(`Loan amount exceeds the available fund (${inr(availableFund)}).`);
+      return;
+    }
     setSubmitting(true);
     try {
       const res = await api.post('/loans', {
@@ -78,6 +89,12 @@ export default function CreateLoan() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="p-6">
           <form onSubmit={submit} className="space-y-4">
+            {availableFund != null && (
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between">
+                <span className="text-sm text-blue-700">Available Fund</span>
+                <span className="font-bold text-blue-800">{inr(availableFund)}</span>
+              </div>
+            )}
             <Field label="Member *">
               <select required value={form.member_id} onChange={(e) => setForm({ ...form, member_id: e.target.value })} className={inputClass}>
                 <option value="">Select member</option>
@@ -86,7 +103,13 @@ export default function CreateLoan() {
             </Field>
             <Field label="Loan Amount (₹) *">
               <input type="number" required min="1" value={form.principal_amount}
-                onChange={(e) => setForm({ ...form, principal_amount: e.target.value })} className={inputClass} placeholder="100000" />
+                onChange={(e) => setForm({ ...form, principal_amount: e.target.value })}
+                className={`${inputClass} ${exceedsFund ? 'border-red-400 focus:ring-red-400' : ''}`} placeholder="100000" />
+              {exceedsFund && (
+                <p className="mt-1 text-xs text-red-600">
+                  Exceeds available fund ({inr(availableFund)}).
+                </p>
+              )}
             </Field>
             <Field label="Monthly Interest Rate (%) *">
               <input type="number" required min="0.01" step="0.01" value={form.interest_rate}
@@ -106,7 +129,7 @@ export default function CreateLoan() {
             <Field label="Remarks">
               <textarea value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} className={inputClass} rows={2} />
             </Field>
-            <button type="submit" disabled={submitting} className="w-full bg-brand-600 text-white py-2.5 rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium">
+            <button type="submit" disabled={submitting || exceedsFund} className="w-full bg-brand-600 text-white py-2.5 rounded-lg hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium">
               {submitting ? 'Creating...' : 'Create Loan'}
             </button>
           </form>

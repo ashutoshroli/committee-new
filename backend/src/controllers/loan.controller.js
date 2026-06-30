@@ -143,6 +143,23 @@ exports.create = asyncHandler(async (req, res) => {
   const payment = Number(monthly_payment_amount);
   const firstInterest = monthlyInterest(principal, rate);
 
+  // ---- Available fund check: a loan can't exceed the committee's available fund ----
+  const fund = await db.query(`
+    SELECT
+      COALESCE(SUM(amount) FILTER (WHERE transaction_type IN
+        ('instalment_received','loan_payment_received','fine_received')), 0) AS total_in,
+      COALESCE(SUM(amount) FILTER (WHERE transaction_type = 'loan_disbursed'), 0) AS total_out
+    FROM fund_transactions
+  `);
+  const availableFund = round2(Number(fund.rows[0].total_in) - Number(fund.rows[0].total_out));
+  if (principal > availableFund) {
+    return res.status(400).json({
+      success: false,
+      message: `Loan amount (${principal}) exceeds the available fund (${availableFund}). Reduce the principal or wait for more funds.`,
+      data: { requested: principal, available_fund: availableFund },
+    });
+  }
+
   const tenure = tenure_months ? Number(tenure_months) : estimateTenure(principal, rate, payment);
   const startStr = start_date || new Date().toISOString().split('T')[0];
   let endDate = null;
