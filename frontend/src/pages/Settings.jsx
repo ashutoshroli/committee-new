@@ -28,7 +28,9 @@ export default function Settings() {
         late_fine_per_month: Number(form.late_fine_per_month || 0),
         grace_period_days: Number(form.grace_period_days || 0),
         payment_due_day: Number(form.payment_due_day || 5),
-        loan_request_day: Number(form.loan_request_day || 10),
+        loan_instalment_due_day: Number(form.loan_instalment_due_day || 5),
+        loan_request_from: form.loan_request_from ? String(form.loan_request_from).slice(0, 10) : null,
+        loan_request_to: form.loan_request_to ? String(form.loan_request_to).slice(0, 10) : null,
         enforce_fund_limit: !!form.enforce_fund_limit,
         allow_advance_emi: !!form.allow_advance_emi,
         compound_unpaid_interest: !!form.compound_unpaid_interest,
@@ -46,6 +48,7 @@ export default function Settings() {
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const toggle = (k) => () => setForm({ ...form, [k]: !form[k] });
+  const dateVal = (k) => (form[k] ? String(form[k]).slice(0, 10) : '');
 
   const LOAN_RULES = [
     { key: 'enforce_fund_limit', label: 'Enforce available-fund limit', desc: 'A loan (or increase) cannot exceed the committee\u2019s available fund.' },
@@ -81,12 +84,25 @@ export default function Settings() {
             <Field label="Grace Period (days)">
               <input type="number" min="0" value={form.grace_period_days || ''} onChange={set('grace_period_days')} className={inputClass} />
             </Field>
-            <Field label="Payment Due Day (1-28)">
+            <Field label="Regular Instalment Due Day (1-28)">
               <input type="number" min="1" max="28" value={form.payment_due_day || ''} onChange={set('payment_due_day')} className={inputClass} />
             </Field>
-            <Field label="Loan Request Closes On (day of month)">
-              <input type="number" min="1" max="28" value={form.loan_request_day || ''} onChange={set('loan_request_day')} className={inputClass} />
+            <Field label="Loan Instalment (EMI) Due Day (1-28)">
+              <input type="number" min="1" max="28" value={form.loan_instalment_due_day || ''} onChange={set('loan_instalment_due_day')} className={inputClass} />
             </Field>
+          </div>
+
+          <div className="pt-2">
+            <h2 className="text-lg font-semibold text-gray-800">Loan Request Window</h2>
+            <p className="text-sm text-gray-500 mb-3">Members can submit loan requests only between these dates. After the "to" date, admins can review, allocate and distribute.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="Requests Open From">
+                <input type="date" value={dateVal('loan_request_from')} onChange={set('loan_request_from')} className={inputClass} />
+              </Field>
+              <Field label="Requests Open To">
+                <input type="date" value={dateVal('loan_request_to')} onChange={set('loan_request_to')} className={inputClass} />
+              </Field>
+            </div>
           </div>
 
           <div className="pt-2">

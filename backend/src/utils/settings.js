@@ -14,6 +14,9 @@ async function ensureLoanRuleColumns() {
     ALTER TABLE committee_settings ADD COLUMN IF NOT EXISTS compound_unpaid_interest  BOOLEAN DEFAULT TRUE;
     ALTER TABLE committee_settings ADD COLUMN IF NOT EXISTS allow_foreclosure         BOOLEAN DEFAULT TRUE;
     ALTER TABLE committee_settings ADD COLUMN IF NOT EXISTS loan_request_day          INTEGER DEFAULT 10;
+    ALTER TABLE committee_settings ADD COLUMN IF NOT EXISTS loan_request_from         DATE;
+    ALTER TABLE committee_settings ADD COLUMN IF NOT EXISTS loan_request_to           DATE;
+    ALTER TABLE committee_settings ADD COLUMN IF NOT EXISTS loan_instalment_due_day   INTEGER DEFAULT 5;
   `);
   ensured = true;
 }

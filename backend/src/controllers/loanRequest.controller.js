@@ -56,9 +56,41 @@ async function reallocate() {
   }
 }
 
+function localDateStr(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+const todayStr = () => localDateStr(new Date());
+
+// Members may submit requests only while the window is open.
+function requestWindowOpen(settings) {
+  const from = localDateStr(settings?.loan_request_from);
+  const to = localDateStr(settings?.loan_request_to);
+  if (from || to) {
+    const t = todayStr();
+    if (from && t < from) return false;
+    if (to && t > to) return false;
+    return true;
+  }
+  // No dates configured -> fall back to the day-of-month rule (open before the close day)
+  return new Date().getDate() < (settings?.loan_request_day || 10);
+}
+
+// Admin review/allocation is allowed once the window has closed.
 function requestWindowClosed(settings) {
-  const day = settings?.loan_request_day || 10;
-  return new Date().getDate() >= day;
+  const to = localDateStr(settings?.loan_request_to);
+  if (to) return todayStr() > to;
+  return new Date().getDate() >= (settings?.loan_request_day || 10);
+}
+
+function windowInfo(settings) {
+  const from = localDateStr(settings?.loan_request_from);
+  const to = localDateStr(settings?.loan_request_to);
+  if (from || to) {
+    return `Loan request window: ${from || 'any'} to ${to || 'any'}.`;
+  }
+  return `Loan requests close on day ${settings?.loan_request_day || 10} of the month.`;
 }
 
 // ---------- List ----------
@@ -109,6 +141,9 @@ exports.summary = asyncHandler(async (req, res) => {
       active_count: active.rows[0].count,
       by_status: byStatus.rows,
       loan_request_day: settings?.loan_request_day || 10,
+      loan_request_from: localDateStr(settings?.loan_request_from),
+      loan_request_to: localDateStr(settings?.loan_request_to),
+      window_open: requestWindowOpen(settings),
       window_closed: requestWindowClosed(settings),
       default_interest_rate: Number(settings?.default_interest_rate || 0),
     },
@@ -122,6 +157,14 @@ exports.create = asyncHandler(async (req, res) => {
   const amount = Number(requested_amount);
   if (!amount || amount <= 0) {
     return res.status(400).json({ success: false, message: 'A valid requested amount is required.' });
+  }
+
+  // Non-admins can only submit while the request window is open
+  if (!isAdmin(req)) {
+    const settings = await getSettings();
+    if (!requestWindowOpen(settings)) {
+      return res.status(400).json({ success: false, message: `The loan request window is currently closed. ${windowInfo(settings)}` });
+    }
   }
 
   let memberId;
@@ -193,7 +236,7 @@ exports.approve = asyncHandler(async (req, res) => {
   await ensureLoanRequestsTable();
   const settings = await getSettings();
   if (!requestWindowClosed(settings)) {
-    return res.status(400).json({ success: false, message: `Requests are still open until day ${settings?.loan_request_day || 10} of the month.` });
+    return res.status(400).json({ success: false, message: `Requests are still open. Review is available after the window closes. ${windowInfo(settings)}` });
   }
   const result = await db.query(
     "UPDATE loan_requests SET status = 'approved', updated_at = NOW() WHERE id = $1 AND status = 'pending' RETURNING *",
@@ -211,7 +254,7 @@ exports.reject = asyncHandler(async (req, res) => {
   await ensureLoanRequestsTable();
   const settings = await getSettings();
   if (!requestWindowClosed(settings)) {
-    return res.status(400).json({ success: false, message: `Requests are still open until day ${settings?.loan_request_day || 10} of the month.` });
+    return res.status(400).json({ success: false, message: `Requests are still open. Review is available after the window closes. ${windowInfo(settings)}` });
   }
   const found = await db.query('SELECT * FROM loan_requests WHERE id = $1', [req.params.id]);
   if (found.rows.length === 0) {
@@ -233,7 +276,7 @@ exports.allocate = asyncHandler(async (req, res) => {
   await ensureLoanRequestsTable();
   const settings = await getSettings();
   if (!requestWindowClosed(settings)) {
-    return res.status(400).json({ success: false, message: `Requests are still open until day ${settings?.loan_request_day || 10} of the month.` });
+    return res.status(400).json({ success: false, message: `Requests are still open. Review is available after the window closes. ${windowInfo(settings)}` });
   }
 
   const rows = (await db.query(

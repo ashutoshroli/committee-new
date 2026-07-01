@@ -29,7 +29,10 @@ CREATE TABLE committee_settings (
     allow_advance_emi        BOOLEAN DEFAULT TRUE,  -- extra payment rolls over to next month(s)
     compound_unpaid_interest BOOLEAN DEFAULT TRUE,  -- unpaid monthly interest is added to principal
     allow_foreclosure        BOOLEAN DEFAULT TRUE,  -- foreclosure is permitted
-    loan_request_day         INTEGER DEFAULT 10,    -- day of month the loan-request window closes
+    loan_request_day         INTEGER DEFAULT 10,    -- (legacy) day of month the loan-request window closes
+    loan_request_from        DATE,                  -- loan request window open date
+    loan_request_to          DATE,                  -- loan request window close date
+    loan_instalment_due_day  INTEGER DEFAULT 5,     -- day of month loan EMI is due
     created_at             TIMESTAMPTZ DEFAULT NOW(),
     updated_at             TIMESTAMPTZ DEFAULT NOW()
 );

@@ -97,7 +97,9 @@ export default function LoanRequests() {
       <PageTitle
         title="Loan Requests"
         action={
-          <button onClick={() => setModal(true)} className="bg-brand-600 text-white px-4 py-2 rounded-lg hover:bg-brand-700 flex items-center gap-2">
+          <button onClick={() => setModal(true)} disabled={summary && !summary.window_open && !isAdmin}
+            className="bg-brand-600 text-white px-4 py-2 rounded-lg hover:bg-brand-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            title={summary && !summary.window_open && !isAdmin ? 'The loan request window is closed' : ''}>
             <FiPlus /> New Request
           </button>
         }
@@ -109,7 +111,13 @@ export default function LoanRequests() {
           <Stat label="Available Fund" value={inr(summary.available_fund)} tone="green" />
           <Stat label="Total Requested (active)" value={inr(summary.total_requested)} tone={overFund ? 'red' : 'blue'} />
           <Stat label="Total Allocated" value={inr(summary.total_allocated)} tone="purple" />
-          <Stat label="Request closes on" value={`Day ${summary.loan_request_day}`} tone="gray" />
+          <Stat
+            label="Request Window"
+            value={summary.loan_request_from || summary.loan_request_to
+              ? `${summary.loan_request_from || '—'} → ${summary.loan_request_to || '—'}`
+              : `Day ${summary.loan_request_day}`}
+            tone={summary.window_open ? 'green' : 'gray'}
+          />
         </div>
       )}
 
@@ -120,7 +128,7 @@ export default function LoanRequests() {
             <span className="text-sm text-gray-500">
               {summary?.window_closed
                 ? 'Request window is closed — you can approve/reject, allocate and distribute.'
-                : `Request window is open until day ${summary?.loan_request_day}. Allocation/approval unlock after that.`}
+                : `Request window is open${summary?.loan_request_to ? ` until ${summary.loan_request_to}` : ''}. Allocation/approval unlock after it closes.`}
             </span>
             <div className="ml-auto flex gap-2">
               <button onClick={allocate} disabled={!summary?.window_closed}
