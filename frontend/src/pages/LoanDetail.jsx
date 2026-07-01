@@ -14,6 +14,7 @@ export default function LoanDetail() {
   const isSuperAdmin = user?.role === 'superadmin';
   const canEdit = user?.role === 'superadmin' || user?.role === 'admin';
   const [loan, setLoan] = useState(null);
+  const [schedule, setSchedule] = useState(null);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [editModal, setEditModal] = useState(false);
@@ -24,7 +25,15 @@ export default function LoanDetail() {
   const load = useCallback(() => {
     setLoading(true);
     api.get(`/loans/${id}`)
-      .then((res) => setLoan(res.data.data))
+      .then(async (res) => {
+        setLoan(res.data.data);
+        try {
+          const s = await api.get(`/loans/${id}/schedule`);
+          setSchedule(s.data.data.projected_schedule || []);
+        } catch {
+          setSchedule(null);
+        }
+      })
       .catch(() => setLoan(null))
       .finally(() => setLoading(false));
   }, [id]);
@@ -108,6 +117,23 @@ export default function LoanDetail() {
   if (loading) return <Spinner />;
   if (!loan) return <Empty>Loan not found</Empty>;
 
+  // ---- Repayment progress calculations ----
+  const principal = Number(loan.principal_amount) || 0;
+  const principalPaid = Number(loan.total_principal_paid) || 0;
+  const interestPaid = Number(loan.total_interest_paid) || 0;
+  const plannedTenure = loan.tenure_months ? Number(loan.tenure_months) : null;
+  const paymentsMade = loan.payments?.filter((p) => p.payment_type !== 'foreclosure').length || 0;
+  const monthsLeft = loan.status === 'active' ? (schedule ? schedule.length : null) : 0;
+  const principalPct = principal > 0 ? Math.min(100, Math.round((principalPaid / principal) * 100)) : 0;
+  const totalPaid = principalPaid + interestPaid;
+
+  let estClose = null;
+  if (loan.status === 'active' && monthsLeft != null && monthsLeft > 0) {
+    const d = new Date();
+    d.setMonth(d.getMonth() + monthsLeft);
+    estClose = d.toISOString().split('T')[0];
+  }
+
   return (
     <div>
       <Link to="/loans" className="inline-flex items-center gap-2 text-brand-600 hover:text-brand-800 mb-4">
@@ -148,6 +174,43 @@ export default function LoanDetail() {
             <button onClick={() => setModal(true)} className="bg-brand-600 text-white px-4 py-2 rounded-lg hover:bg-brand-700">Record Payment</button>
             <button onClick={foreclose} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">Foreclose</button>
           </div>
+        )}
+      </Card>
+
+      <Card className="p-6 mb-6">
+        <h2 className="text-lg font-semibold mb-4">Repayment Progress</h2>
+
+        <div className="mb-5">
+          <div className="flex justify-between text-sm mb-1">
+            <span className="text-gray-500">Principal repaid</span>
+            <span className="font-medium">{inr(principalPaid)} / {inr(principal)} ({principalPct}%)</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-3">
+            <div className="bg-brand-600 h-3 rounded-full transition-all" style={{ width: `${principalPct}%` }} />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Box label="Total Tenure" value={plannedTenure ? `${plannedTenure} months` : 'Open-ended'} />
+          <Box label="EMIs Paid" value={`${paymentsMade}`} tone="green" />
+          <Box
+            label="Months Left (approx)"
+            value={loan.status === 'active' ? (monthsLeft != null ? `${monthsLeft} months` : '—') : '0 months'}
+            tone="yellow"
+          />
+          <Box label="Est. Close" value={estClose ? fmtDate(estClose) : (loan.closed_date ? fmtDate(loan.closed_date) : '—')} />
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+          <Box label="Principal Paid" value={inr(principalPaid)} tone="green" />
+          <Box label="Interest Paid" value={inr(interestPaid)} tone="green" />
+          <Box label="Remaining Principal" value={inr(loan.remaining_principal)} tone="red" />
+          <Box label="Total Paid" value={inr(totalPaid)} tone="purple" />
+        </div>
+
+        {plannedTenure && loan.status === 'active' && (
+          <p className="text-xs text-gray-400 mt-3">
+            {paymentsMade} of ~{plannedTenure} EMIs done · {monthsLeft != null ? `about ${monthsLeft} left` : ''} at the current EMI of {inr(loan.monthly_payment_amount)}.
+          </p>
         )}
       </Card>
 
