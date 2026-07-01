@@ -338,8 +338,35 @@ exports.makePayment = asyncHandler(async (req, res) => {
   }
   const loan = loanRes.rows[0];
 
-  const calc = applyPayment(loan.remaining_principal, loan.interest_rate, payment_amount);
   const { date, month, year } = periodOf(payment_date);
+
+  // ---- One EMI per month rule ----
+  // Multiple payments within the same calendar month are treated as parts of a single
+  // EMI: their combined total for the month must not exceed the monthly EMI amount.
+  const emi = Number(loan.monthly_payment_amount);
+  const paidThisMonthRes = await db.query(
+    "SELECT COALESCE(SUM(payment_amount), 0) AS total FROM loan_payments WHERE loan_id = $1 AND month = $2 AND year = $3 AND payment_type <> 'foreclosure'",
+    [loan.id, month, year]
+  );
+  const paidThisMonth = Number(paidThisMonthRes.rows[0].total);
+  const remainingEmiThisMonth = round2(emi - paidThisMonth);
+
+  if (remainingEmiThisMonth <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: `This month's EMI (${emi}) is already fully paid. Payments made within a month together count as a single EMI.`,
+      data: { emi, paid_this_month: paidThisMonth, max_allowed: 0 },
+    });
+  }
+  if (Number(payment_amount) - remainingEmiThisMonth > 0.01) {
+    return res.status(400).json({
+      success: false,
+      message: `Payment exceeds this month's remaining EMI. Monthly EMI is ${emi}; already paid ${paidThisMonth} this month, so you can pay at most ${remainingEmiThisMonth} more. Use Foreclose to close the loan early.`,
+      data: { emi, paid_this_month: paidThisMonth, max_allowed: remainingEmiThisMonth },
+    });
+  }
+
+  const calc = applyPayment(loan.remaining_principal, loan.interest_rate, payment_amount);
   const newStatus = calc.newPrincipal === 0 ? 'closed' : 'active';
 
   const payRow = await db.query(

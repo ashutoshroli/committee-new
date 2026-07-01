@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { FiArrowLeft, FiEdit2, FiTrash2 } from 'react-icons/fi';
 import api from '../lib/api';
-import { inr, fmtDate } from '../lib/format';
+import { inr, fmtDate, MONTHS } from '../lib/format';
 import { useAuth } from '../context/AuthContext';
 import { Card, Spinner, Empty, Badge, Modal, Field, inputClass } from '../components/ui';
 
@@ -122,10 +122,34 @@ export default function LoanDetail() {
   const principalPaid = Number(loan.total_principal_paid) || 0;
   const interestPaid = Number(loan.total_interest_paid) || 0;
   const plannedTenure = loan.tenure_months ? Number(loan.tenure_months) : null;
-  const paymentsMade = loan.payments?.filter((p) => p.payment_type !== 'foreclosure').length || 0;
+  // EMIs paid = number of distinct months in which a (non-foreclosure) payment was made.
+  // Multiple payments in the same month count as one EMI.
+  const emiMonthKeys = new Set(
+    (loan.payments || [])
+      .filter((p) => p.payment_type !== 'foreclosure')
+      .map((p) => `${p.year}-${p.month}`)
+  );
+  const paymentsMade = emiMonthKeys.size;
   const monthsLeft = loan.status === 'active' ? (schedule ? schedule.length : null) : 0;
   const principalPct = principal > 0 ? Math.min(100, Math.round((principalPaid / principal) * 100)) : 0;
   const totalPaid = principalPaid + interestPaid;
+
+  // ---- Month-wise breakdown (groups multiple payments in a month into one EMI row) ----
+  const monthlyMap = {};
+  for (const p of loan.payments || []) {
+    const key = `${p.year}-${String(p.month).padStart(2, '0')}`;
+    if (!monthlyMap[key]) {
+      monthlyMap[key] = { year: p.year, month: p.month, paid: 0, interest: 0, principal: 0, count: 0, foreclosed: false };
+    }
+    const m = monthlyMap[key];
+    m.paid += Number(p.payment_amount);
+    m.interest += Number(p.interest_component);
+    m.principal += Number(p.principal_component);
+    m.count += 1;
+    if (p.payment_type === 'foreclosure') m.foreclosed = true;
+  }
+  const monthlyRows = Object.values(monthlyMap).sort((a, b) => (b.year - a.year) || (b.month - a.month));
+  const emiAmount = Number(loan.monthly_payment_amount) || 0;
 
   let estClose = null;
   if (loan.status === 'active' && monthsLeft != null && monthsLeft > 0) {
@@ -214,6 +238,47 @@ export default function LoanDetail() {
         )}
       </Card>
 
+      <Card className="p-6 mb-6">
+        <h2 className="text-lg font-semibold mb-1">Month-wise Breakdown</h2>
+        <p className="text-xs text-gray-400 mb-4">Multiple payments within a month are combined into a single EMI. Monthly EMI: {inr(emiAmount)}</p>
+        {monthlyRows.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <Th>Month</Th><Th>EMI Due</Th><Th>Paid</Th><Th>Interest</Th><Th>Principal</Th><Th>Payments</Th><Th>Status</Th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {monthlyRows.map((m) => {
+                  const key = `${m.year}-${m.month}`;
+                  const fullyPaid = m.paid + 0.01 >= emiAmount;
+                  const status = m.foreclosed ? 'Foreclosed' : (fullyPaid ? 'Paid (1 EMI)' : 'Partial');
+                  const statusCls = m.foreclosed
+                    ? 'bg-purple-100 text-purple-700'
+                    : (fullyPaid ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700');
+                  return (
+                    <tr key={key} className="hover:bg-gray-50">
+                      <td className="px-4 py-2 font-medium">{MONTHS[m.month - 1]} {m.year}</td>
+                      <td className="px-4 py-2 text-gray-500">{inr(emiAmount)}</td>
+                      <td className="px-4 py-2 font-medium">{inr(m.paid)}</td>
+                      <td className="px-4 py-2 text-orange-600">{inr(m.interest)}</td>
+                      <td className="px-4 py-2 text-green-600">{inr(m.principal)}</td>
+                      <td className="px-4 py-2 text-gray-500">{m.count}{m.count > 1 ? ' payments' : ' payment'}</td>
+                      <td className="px-4 py-2">
+                        <span className={`px-2 py-1 text-xs rounded-full ${statusCls}`}>{status}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-gray-500 text-center py-6">No payments recorded yet.</p>
+        )}
+      </Card>
+
       <Card className="p-6">
         <h2 className="text-lg font-semibold mb-4">Payment History</h2>
         {loan.payments?.length ? (
@@ -245,18 +310,33 @@ export default function LoanDetail() {
 
       {modal && (
         <Modal title="Record Payment" onClose={() => setModal(false)}>
-          <p className="text-sm text-gray-500 mb-3">
-            Interest due {inr(loan.current_month_interest)} · Set EMI {inr(loan.monthly_payment_amount)}
+          {(() => {
+            const pd = new Date(form.payment_date);
+            const pm = pd.getMonth() + 1;
+            const py = pd.getFullYear();
+            const paidThisMonth = (loan.payments || [])
+              .filter((p) => p.payment_type !== 'foreclosure' && p.month === pm && p.year === py)
+              .reduce((s, p) => s + Number(p.payment_amount), 0);
+            const remainThisMonth = Math.max(0, Math.round((emiAmount - paidThisMonth) * 100) / 100);
+            return (
+          <>
+          <p className="text-sm text-gray-500 mb-2">
+            Interest due {inr(loan.current_month_interest)} · Monthly EMI {inr(emiAmount)}
           </p>
+          <div className={`text-sm mb-3 p-2 rounded-lg ${remainThisMonth <= 0 ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-700'}`}>
+            {MONTHS[pm - 1]} {py}: paid {inr(paidThisMonth)} · you can pay up to <b>{inr(remainThisMonth)}</b> more this month.
+          </div>
           <div className="flex flex-wrap gap-2 mb-4">
-            <Quick label="Full EMI" onClick={() => setForm({ ...form, payment_amount: loan.monthly_payment_amount })} />
+            <Quick label="Remaining EMI" onClick={() => setForm({ ...form, payment_amount: remainThisMonth })} />
             <Quick label="Interest Only" onClick={() => setForm({ ...form, payment_amount: loan.current_month_interest })} />
-            <Quick label="Foreclosure" onClick={() => setForm({ ...form, payment_amount: loan.foreclosure_amount })} />
           </div>
           <form onSubmit={pay} className="space-y-3">
             <Field label="Amount (₹) *">
               <input type="number" required min="1" step="0.01" value={form.payment_amount}
                 onChange={(e) => setForm({ ...form, payment_amount: e.target.value })} className={inputClass} />
+              {Number(form.payment_amount) > remainThisMonth && (
+                <p className="mt-1 text-xs text-red-600">Exceeds this month's remaining EMI ({inr(remainThisMonth)}). Multiple payments in a month count as one EMI.</p>
+              )}
             </Field>
             <Field label="Payment Date">
               <input type="date" value={form.payment_date} onChange={(e) => setForm({ ...form, payment_date: e.target.value })} className={inputClass} />
@@ -265,10 +345,13 @@ export default function LoanDetail() {
               <input value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} className={inputClass} />
             </Field>
             <div className="flex gap-3 pt-2">
-              <button type="submit" className="flex-1 bg-brand-600 text-white py-2 rounded-lg hover:bg-brand-700">Submit</button>
+              <button type="submit" disabled={Number(form.payment_amount) > remainThisMonth} className="flex-1 bg-brand-600 text-white py-2 rounded-lg hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed">Submit</button>
               <button type="button" onClick={() => setModal(false)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300">Cancel</button>
             </div>
           </form>
+          </>
+            );
+          })()}
         </Modal>
       )}
       {editModal && editForm && (
