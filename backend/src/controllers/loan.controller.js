@@ -8,6 +8,10 @@ function periodOf(dateStr) {
   return { date: d.toISOString().split('T')[0], month: d.getMonth() + 1, year: d.getFullYear() };
 }
 
+function nextMonth(month, year) {
+  return month === 12 ? { month: 1, year: year + 1 } : { month: month + 1, year };
+}
+
 // ---------- Read ----------
 exports.getAll = asyncHandler(async (req, res) => {
   const result = await db.query(
@@ -326,9 +330,12 @@ exports.remove = asyncHandler(async (req, res) => {
 });
 
 // ---------- Make payment ----------
+// The payment fills the current month's EMI first; any extra automatically rolls
+// over to the following month(s) as advance EMIs (one EMI per month).
 exports.makePayment = asyncHandler(async (req, res) => {
   const { payment_amount, payment_date, remarks } = req.body;
-  if (!payment_amount || Number(payment_amount) <= 0) {
+  const totalAmount = Number(payment_amount);
+  if (!totalAmount || totalAmount <= 0) {
     return res.status(400).json({ success: false, message: 'Valid payment_amount is required.' });
   }
 
@@ -337,46 +344,78 @@ exports.makePayment = asyncHandler(async (req, res) => {
     return res.status(404).json({ success: false, message: 'Active loan not found.' });
   }
   const loan = loanRes.rows[0];
-
-  const { date, month, year } = periodOf(payment_date);
-
-  // ---- One EMI per month rule ----
-  // Multiple payments within the same calendar month are treated as parts of a single
-  // EMI: their combined total for the month must not exceed the monthly EMI amount.
   const emi = Number(loan.monthly_payment_amount);
+
+  const start = periodOf(payment_date);
+  const date = start.date;
+  let month = start.month;
+  let year = start.year;
+
+  // Remaining EMI for the month the payment is dated in
   const paidThisMonthRes = await db.query(
     "SELECT COALESCE(SUM(payment_amount), 0) AS total FROM loan_payments WHERE loan_id = $1 AND month = $2 AND year = $3 AND payment_type <> 'foreclosure'",
     [loan.id, month, year]
   );
-  const paidThisMonth = Number(paidThisMonthRes.rows[0].total);
-  const remainingEmiThisMonth = round2(emi - paidThisMonth);
-
-  if (remainingEmiThisMonth <= 0) {
-    return res.status(400).json({
-      success: false,
-      message: `This month's EMI (${emi}) is already fully paid. Payments made within a month together count as a single EMI.`,
-      data: { emi, paid_this_month: paidThisMonth, max_allowed: 0 },
-    });
-  }
-  if (Number(payment_amount) - remainingEmiThisMonth > 0.01) {
-    return res.status(400).json({
-      success: false,
-      message: `Payment exceeds this month's remaining EMI. Monthly EMI is ${emi}; already paid ${paidThisMonth} this month, so you can pay at most ${remainingEmiThisMonth} more. Use Foreclose to close the loan early.`,
-      data: { emi, paid_this_month: paidThisMonth, max_allowed: remainingEmiThisMonth },
-    });
+  let cap = round2(emi - Number(paidThisMonthRes.rows[0].total));
+  if (cap <= 0) {
+    // This month's EMI is already fully paid -> start applying from next month
+    ({ month, year } = nextMonth(month, year));
+    cap = emi;
   }
 
-  const calc = applyPayment(loan.remaining_principal, loan.interest_rate, payment_amount);
-  const newStatus = calc.newPrincipal === 0 ? 'closed' : 'active';
+  let remaining = Number(loan.remaining_principal);
+  let amountLeft = round2(totalAmount);
+  let totalInterest = 0;
+  let totalPrincipal = 0;
+  let monthsCovered = 0;
+  let status = 'active';
+  let closedOn = null;
+  const created = [];
 
-  const payRow = await db.query(
-    `INSERT INTO loan_payments
-        (loan_id, member_id, payment_amount, principal_component, interest_component,
-         remaining_principal_after, payment_type, payment_date, month, year, remarks)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-    [loan.id, loan.member_id, Number(payment_amount), calc.principalComponent, calc.interestComponent,
-     calc.newPrincipal, calc.paymentType, date, month, year, remarks || null]
-  );
+  // Distribute the amount across consecutive months, at most one EMI per month
+  while (amountLeft > 0.009 && remaining > 0) {
+    const chunk = round2(Math.min(amountLeft, cap));
+    if (chunk <= 0) break;
+
+    const calc = applyPayment(remaining, loan.interest_rate, chunk);
+    status = calc.newPrincipal === 0 ? 'closed' : 'active';
+
+    const noteBase = remarks ? `${remarks} · ` : '';
+    const note = monthsCovered > 0 ? `${noteBase}advance EMI for ${month}/${year}` : (remarks || null);
+
+    const payRow = await db.query(
+      `INSERT INTO loan_payments
+          (loan_id, member_id, payment_amount, principal_component, interest_component,
+           remaining_principal_after, payment_type, payment_date, month, year, remarks)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [loan.id, loan.member_id, chunk, calc.principalComponent, calc.interestComponent,
+       calc.newPrincipal, calc.paymentType, date, month, year, note]
+    );
+    created.push(payRow.rows[0]);
+
+    await db.query(
+      `INSERT INTO fund_transactions (transaction_type, amount, reference_id, description, transaction_date)
+       VALUES ('loan_payment_received', $1, $2, $3, $4)`,
+      [chunk, payRow.rows[0].id, `Loan payment (${calc.paymentType}) for ${month}/${year}`, date]
+    );
+
+    await db.query(
+      `INSERT INTO loan_interest_log (loan_id, principal_at_start, interest_amount, is_compounded, month, year)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [loan.id, calc.principalBefore, calc.interest, calc.unpaidInterest > 0, month, year]
+    );
+
+    totalInterest = round2(totalInterest + calc.interestComponent);
+    totalPrincipal = round2(totalPrincipal + calc.principalComponent);
+    remaining = calc.newPrincipal;
+    amountLeft = round2(amountLeft - chunk);
+    monthsCovered += 1;
+
+    if (status === 'closed') { closedOn = date; break; }
+
+    ({ month, year } = nextMonth(month, year));
+    cap = emi;
+  }
 
   await db.query(
     `UPDATE loans SET
@@ -387,39 +426,29 @@ exports.makePayment = asyncHandler(async (req, res) => {
         closed_date = $5,
         updated_at = NOW()
      WHERE id = $6`,
-    [calc.newPrincipal, calc.interestComponent, calc.principalComponent, newStatus,
-     newStatus === 'closed' ? date : null, loan.id]
-  );
-
-  await db.query(
-    `INSERT INTO fund_transactions (transaction_type, amount, reference_id, description, transaction_date)
-     VALUES ('loan_payment_received', $1, $2, $3, $4)`,
-    [Number(payment_amount), payRow.rows[0].id, `Loan payment (${calc.paymentType})`, date]
-  );
-
-  await db.query(
-    `INSERT INTO loan_interest_log (loan_id, principal_at_start, interest_amount, is_compounded, month, year)
-     VALUES ($1,$2,$3,$4,$5,$6)`,
-    [loan.id, calc.principalBefore, calc.interest, calc.unpaidInterest > 0, month, year]
+    [remaining, totalInterest, totalPrincipal, status, closedOn, loan.id]
   );
 
   await logActivity(req, 'payment', 'loan', loan.id,
-    `Recorded ${calc.paymentType} payment of ${Number(payment_amount)} on loan #${loan.id}${newStatus === 'closed' ? ' (loan closed)' : ''}`);
+    `Recorded payment of ${totalAmount} on loan #${loan.id} covering ${monthsCovered} month(s)${status === 'closed' ? ' (loan closed)' : ''}`);
 
+  const advanceMonths = Math.max(0, monthsCovered - 1);
   res.json({
     success: true,
-    message: newStatus === 'closed' ? 'Payment successful. Loan is now closed!' : 'Payment recorded successfully.',
+    message: status === 'closed'
+      ? 'Payment successful. Loan is now closed!'
+      : (advanceMonths > 0
+          ? `Payment recorded. ${advanceMonths} extra month(s) covered as advance EMI.`
+          : 'Payment recorded successfully.'),
     data: {
-      payment: payRow.rows[0],
-      breakdown: {
-        total_paid: Number(payment_amount),
-        interest_covered: calc.interestComponent,
-        principal_reduced: calc.principalComponent,
-        unpaid_interest_compounded: calc.unpaidInterest > 0 ? calc.unpaidInterest : 0,
-        previous_principal: calc.principalBefore,
-        new_remaining_principal: calc.newPrincipal,
-        loan_status: newStatus,
-      },
+      months_covered: monthsCovered,
+      total_applied: round2(totalAmount - amountLeft),
+      unused_amount: amountLeft > 0.009 ? amountLeft : 0,
+      interest_covered: totalInterest,
+      principal_reduced: totalPrincipal,
+      new_remaining_principal: remaining,
+      loan_status: status,
+      payments: created,
     },
   });
 });
