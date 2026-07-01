@@ -24,6 +24,11 @@ CREATE TABLE committee_settings (
     late_fine_per_month    NUMERIC(10, 2) DEFAULT 0,
     grace_period_days      INTEGER DEFAULT 0,
     payment_due_day        INTEGER DEFAULT 5,                     -- day of month payment is due
+    -- ----- Loan rule toggles (configurable from Settings) -----
+    enforce_fund_limit       BOOLEAN DEFAULT TRUE,  -- loan amount cannot exceed available fund
+    allow_advance_emi        BOOLEAN DEFAULT TRUE,  -- extra payment rolls over to next month(s)
+    compound_unpaid_interest BOOLEAN DEFAULT TRUE,  -- unpaid monthly interest is added to principal
+    allow_foreclosure        BOOLEAN DEFAULT TRUE,  -- foreclosure is permitted
     created_at             TIMESTAMPTZ DEFAULT NOW(),
     updated_at             TIMESTAMPTZ DEFAULT NOW()
 );

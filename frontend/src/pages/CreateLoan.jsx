@@ -18,6 +18,7 @@ export default function CreateLoan() {
   const [preview, setPreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [availableFund, setAvailableFund] = useState(null);
+  const [enforceFundLimit, setEnforceFundLimit] = useState(true);
   // Which of EMI / tenure the user last typed in — that one drives the other.
   const [driver, setDriver] = useState('emi');
 
@@ -27,6 +28,9 @@ export default function CreateLoan() {
       .catch(() => {});
     api.get('/dashboard/stats')
       .then((res) => setAvailableFund(res.data.data.fund.available))
+      .catch(() => {});
+    api.get('/settings')
+      .then((res) => setEnforceFundLimit(res.data.data.enforce_fund_limit !== false))
       .catch(() => {});
   }, []);
 
@@ -69,7 +73,7 @@ export default function CreateLoan() {
   }, [fetchPreview]);
 
   const exceedsFund =
-    availableFund != null && form.principal_amount !== '' && Number(form.principal_amount) > availableFund;
+    enforceFundLimit && availableFund != null && form.principal_amount !== '' && Number(form.principal_amount) > availableFund;
 
   const submit = async (e) => {
     e.preventDefault();

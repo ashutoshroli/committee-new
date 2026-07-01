@@ -28,6 +28,10 @@ export default function Settings() {
         late_fine_per_month: Number(form.late_fine_per_month || 0),
         grace_period_days: Number(form.grace_period_days || 0),
         payment_due_day: Number(form.payment_due_day || 5),
+        enforce_fund_limit: !!form.enforce_fund_limit,
+        allow_advance_emi: !!form.allow_advance_emi,
+        compound_unpaid_interest: !!form.compound_unpaid_interest,
+        allow_foreclosure: !!form.allow_foreclosure,
       });
       toast.success('Settings saved');
     } catch (err) {
@@ -40,6 +44,14 @@ export default function Settings() {
   if (loading || !form) return <Spinner label="Loading settings..." />;
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const toggle = (k) => () => setForm({ ...form, [k]: !form[k] });
+
+  const LOAN_RULES = [
+    { key: 'enforce_fund_limit', label: 'Enforce available-fund limit', desc: 'A loan (or increase) cannot exceed the committee\u2019s available fund.' },
+    { key: 'allow_advance_emi', label: 'Allow advance EMI', desc: 'Extra amount paid rolls over to the next month(s). If off, a month\u2019s payments cannot exceed that month\u2019s EMI.' },
+    { key: 'compound_unpaid_interest', label: 'Compound unpaid interest', desc: 'Unpaid monthly interest is added to the principal when monthly interest is processed.' },
+    { key: 'allow_foreclosure', label: 'Allow foreclosure', desc: 'Loans can be closed early by paying the remaining principal plus current interest.' },
+  ];
 
   return (
     <div>
@@ -72,6 +84,32 @@ export default function Settings() {
               <input type="number" min="1" max="28" value={form.payment_due_day || ''} onChange={set('payment_due_day')} className={inputClass} />
             </Field>
           </div>
+
+          <div className="pt-2">
+            <h2 className="text-lg font-semibold text-gray-800">Loan Rules</h2>
+            <p className="text-sm text-gray-500 mb-3">Turn individual loan rules on or off. Changes apply to new actions.</p>
+            <div className="space-y-2">
+              {LOAN_RULES.map((r) => (
+                <label key={r.key} htmlFor={r.key} className="flex items-start gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                  <button
+                    type="button"
+                    id={r.key}
+                    role="switch"
+                    aria-checked={!!form[r.key]}
+                    onClick={toggle(r.key)}
+                    className={`mt-0.5 relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${form[r.key] ? 'bg-brand-600' : 'bg-gray-300'}`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${form[r.key] ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                  <span>
+                    <span className="block font-medium text-gray-800">{r.label}</span>
+                    <span className="block text-xs text-gray-500">{r.desc}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+
           <button type="submit" disabled={saving} className="w-full bg-brand-600 text-white py-2.5 rounded-lg hover:bg-brand-700 disabled:opacity-50 font-medium">
             {saving ? 'Saving...' : 'Save Settings'}
           </button>

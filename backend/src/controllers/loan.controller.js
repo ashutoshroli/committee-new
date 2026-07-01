@@ -2,6 +2,7 @@ const db = require('../config/db');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { monthlyInterest, estimateTenure, computeEmi, buildSchedule, applyPayment, round2 } = require('../utils/loanMath');
 const { logActivity } = require('../utils/activityLog');
+const { getSettings } = require('../utils/settings');
 
 function periodOf(dateStr) {
   const d = dateStr ? new Date(dateStr) : new Date();
@@ -159,21 +160,24 @@ exports.create = asyncHandler(async (req, res) => {
   const payment = Number(monthly_payment_amount);
   const firstInterest = monthlyInterest(principal, rate);
 
-  // ---- Available fund check: a loan can't exceed the committee's available fund ----
-  const fund = await db.query(`
-    SELECT
-      COALESCE(SUM(amount) FILTER (WHERE transaction_type IN
-        ('instalment_received','loan_payment_received','fine_received')), 0) AS total_in,
-      COALESCE(SUM(amount) FILTER (WHERE transaction_type = 'loan_disbursed'), 0) AS total_out
-    FROM fund_transactions
-  `);
-  const availableFund = round2(Number(fund.rows[0].total_in) - Number(fund.rows[0].total_out));
-  if (principal > availableFund) {
-    return res.status(400).json({
-      success: false,
-      message: `Loan amount (${principal}) exceeds the available fund (${availableFund}). Reduce the principal or wait for more funds.`,
-      data: { requested: principal, available_fund: availableFund },
-    });
+  // ---- Available fund check (only when the rule is enabled in Settings) ----
+  const settings = await getSettings();
+  if (settings?.enforce_fund_limit) {
+    const fund = await db.query(`
+      SELECT
+        COALESCE(SUM(amount) FILTER (WHERE transaction_type IN
+          ('instalment_received','loan_payment_received','fine_received')), 0) AS total_in,
+        COALESCE(SUM(amount) FILTER (WHERE transaction_type = 'loan_disbursed'), 0) AS total_out
+      FROM fund_transactions
+    `);
+    const availableFund = round2(Number(fund.rows[0].total_in) - Number(fund.rows[0].total_out));
+    if (principal > availableFund) {
+      return res.status(400).json({
+        success: false,
+        message: `Loan amount (${principal}) exceeds the available fund (${availableFund}). Reduce the principal or wait for more funds.`,
+        data: { requested: principal, available_fund: availableFund },
+      });
+    }
   }
 
   const tenure = tenure_months ? Number(tenure_months) : estimateTenure(principal, rate, payment);
@@ -233,24 +237,27 @@ exports.update = asyncHandler(async (req, res) => {
         message: `New principal (${newPrincipal}) cannot be less than principal already paid (${principalPaid}).`,
       });
     }
-    // If principal increases, the extra disbursal must fit in the available fund
+    // If principal increases, the extra disbursal must fit in the available fund (when the rule is on)
     const increase = newPrincipal - principal;
     if (increase > 0) {
-      const fund = await db.query(`
-        SELECT
-          COALESCE(SUM(amount) FILTER (WHERE transaction_type IN
-            ('instalment_received','loan_payment_received','fine_received')), 0) AS total_in,
-          COALESCE(SUM(amount) FILTER (WHERE transaction_type = 'loan_disbursed'), 0) AS total_out
-        FROM fund_transactions
-      `);
-      const availableFund = round2(Number(fund.rows[0].total_in) - Number(fund.rows[0].total_out));
-      const maxPrincipal = round2(availableFund + principal);
-      if (newPrincipal > maxPrincipal) {
-        return res.status(400).json({
-          success: false,
-          message: `Principal (${newPrincipal}) exceeds the maximum allowed (${maxPrincipal}) = available fund (${availableFund}) + amount already disbursed to this loan (${principal}).`,
-          data: { requested: newPrincipal, max_principal: maxPrincipal, available_fund: availableFund },
-        });
+      const settings = await getSettings();
+      if (settings?.enforce_fund_limit) {
+        const fund = await db.query(`
+          SELECT
+            COALESCE(SUM(amount) FILTER (WHERE transaction_type IN
+              ('instalment_received','loan_payment_received','fine_received')), 0) AS total_in,
+            COALESCE(SUM(amount) FILTER (WHERE transaction_type = 'loan_disbursed'), 0) AS total_out
+          FROM fund_transactions
+        `);
+        const availableFund = round2(Number(fund.rows[0].total_in) - Number(fund.rows[0].total_out));
+        const maxPrincipal = round2(availableFund + principal);
+        if (newPrincipal > maxPrincipal) {
+          return res.status(400).json({
+            success: false,
+            message: `Principal (${newPrincipal}) exceeds the maximum allowed (${maxPrincipal}) = available fund (${availableFund}) + amount already disbursed to this loan (${principal}).`,
+            data: { requested: newPrincipal, max_principal: maxPrincipal, available_fund: availableFund },
+          });
+        }
       }
     }
     principal = newPrincipal;
@@ -345,6 +352,8 @@ exports.makePayment = asyncHandler(async (req, res) => {
   }
   const loan = loanRes.rows[0];
   const emi = Number(loan.monthly_payment_amount);
+  const settings = await getSettings();
+  const allowAdvance = settings ? settings.allow_advance_emi : true;
 
   const start = periodOf(payment_date);
   const date = start.date;
@@ -357,8 +366,27 @@ exports.makePayment = asyncHandler(async (req, res) => {
     [loan.id, month, year]
   );
   let cap = round2(emi - Number(paidThisMonthRes.rows[0].total));
+
+  // When advance EMI is disabled, a month's payments cannot exceed that month's EMI.
+  if (!allowAdvance) {
+    if (cap <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: `This month's EMI (${emi}) is already fully paid. Advance EMI is disabled, so extra cannot be applied to future months.`,
+        data: { emi, max_allowed: 0 },
+      });
+    }
+    if (totalAmount - cap > 0.01) {
+      return res.status(400).json({
+        success: false,
+        message: `Payment exceeds this month's remaining EMI (${cap}). Advance EMI is disabled. Enable it in Settings to allow paying ahead, or use Foreclose to close early.`,
+        data: { emi, max_allowed: cap },
+      });
+    }
+  }
+
   if (cap <= 0) {
-    // This month's EMI is already fully paid -> start applying from next month
+    // This month's EMI is already fully paid -> start applying from next month (advance mode)
     ({ month, year } = nextMonth(month, year));
     cap = emi;
   }
@@ -460,6 +488,10 @@ exports.foreclose = asyncHandler(async (req, res) => {
     return res.status(404).json({ success: false, message: 'Active loan not found.' });
   }
   const loan = loanRes.rows[0];
+  const settings = await getSettings();
+  if (settings && !settings.allow_foreclosure) {
+    return res.status(403).json({ success: false, message: 'Foreclosure is disabled in Settings.' });
+  }
   const remaining = Number(loan.remaining_principal);
   const interest = monthlyInterest(remaining, loan.interest_rate);
   const amount = round2(remaining + interest);
@@ -506,6 +538,8 @@ exports.processMonthlyInterest = asyncHandler(async (req, res) => {
   }
 
   const loans = await db.query("SELECT * FROM loans WHERE status = 'active'");
+  const settings = await getSettings();
+  const compound = settings ? settings.compound_unpaid_interest : true;
   const results = [];
 
   for (const loan of loans.rows) {
@@ -519,7 +553,7 @@ exports.processMonthlyInterest = asyncHandler(async (req, res) => {
     const interestPaid = Number(paid.rows[0].paid);
     const unpaid = round2(interest - interestPaid);
 
-    if (unpaid > 0) {
+    if (unpaid > 0 && compound) {
       const newPrincipal = round2(remaining + unpaid);
       await db.query('UPDATE loans SET remaining_principal = $1, updated_at = NOW() WHERE id = $2', [newPrincipal, loan.id]);
       await db.query(
@@ -528,10 +562,22 @@ exports.processMonthlyInterest = asyncHandler(async (req, res) => {
         [loan.id, remaining, unpaid, month, year]
       );
       results.push({ loan_id: loan.id, member_id: loan.member_id, unpaid_interest: unpaid, compounded: true, new_principal: newPrincipal });
+    } else if (unpaid > 0 && !compound) {
+      // Rule disabled: record the unpaid interest but do not add it to the principal
+      await db.query(
+        `INSERT INTO loan_interest_log (loan_id, principal_at_start, interest_amount, is_compounded, month, year)
+         VALUES ($1,$2,$3,FALSE,$4,$5)`,
+        [loan.id, remaining, unpaid, month, year]
+      );
+      results.push({ loan_id: loan.id, member_id: loan.member_id, unpaid_interest: unpaid, compounded: false });
     } else {
       results.push({ loan_id: loan.id, member_id: loan.member_id, interest_fully_paid: true });
     }
   }
 
-  res.json({ success: true, message: `Monthly interest processed for ${month}/${year}.`, data: results });
+  res.json({
+    success: true,
+    message: `Monthly interest processed for ${month}/${year}${compound ? '' : ' (compounding disabled)'}.`,
+    data: results,
+  });
 });

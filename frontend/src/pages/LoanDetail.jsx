@@ -15,6 +15,7 @@ export default function LoanDetail() {
   const canEdit = user?.role === 'superadmin' || user?.role === 'admin';
   const [loan, setLoan] = useState(null);
   const [schedule, setSchedule] = useState(null);
+  const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [editModal, setEditModal] = useState(false);
@@ -24,6 +25,9 @@ export default function LoanDetail() {
 
   const load = useCallback(() => {
     setLoading(true);
+    api.get('/settings')
+      .then((res) => setSettings(res.data.data))
+      .catch(() => setSettings(null));
     api.get(`/loans/${id}`)
       .then(async (res) => {
         setLoan(res.data.data);
@@ -151,6 +155,11 @@ export default function LoanDetail() {
   const monthlyRows = Object.values(monthlyMap).sort((a, b) => (b.year - a.year) || (b.month - a.month));
   const emiAmount = Number(loan.monthly_payment_amount) || 0;
 
+  // ---- Loan rule flags (from Settings) ----
+  const allowAdvance = settings ? settings.allow_advance_emi !== false : true;
+  const enforceFundLimit = settings ? settings.enforce_fund_limit !== false : true;
+  const allowForeclosure = settings ? settings.allow_foreclosure !== false : true;
+
   let estClose = null;
   if (loan.status === 'active' && monthsLeft != null && monthsLeft > 0) {
     const d = new Date();
@@ -196,7 +205,9 @@ export default function LoanDetail() {
         {loan.status === 'active' && (
           <div className="flex flex-wrap gap-3 mt-6">
             <button onClick={() => setModal(true)} className="bg-brand-600 text-white px-4 py-2 rounded-lg hover:bg-brand-700">Record Payment</button>
-            <button onClick={foreclose} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">Foreclose</button>
+            {allowForeclosure && (
+              <button onClick={foreclose} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">Foreclose</button>
+            )}
           </div>
         )}
       </Card>
@@ -323,12 +334,18 @@ export default function LoanDetail() {
           <p className="text-sm text-gray-500 mb-2">
             Interest due {inr(loan.current_month_interest)} · Monthly EMI {inr(emiAmount)}
           </p>
-          <div className="text-sm mb-3 p-2 rounded-lg bg-blue-50 text-blue-700">
-            {MONTHS[pm - 1]} {py}: paid {inr(paidThisMonth)}. Paying more than {inr(remainThisMonth)} rolls over to upcoming months as advance EMI.
+          <div className={`text-sm mb-3 p-2 rounded-lg ${allowAdvance ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
+            {allowAdvance ? (
+              <>{MONTHS[pm - 1]} {py}: paid {inr(paidThisMonth)}. Paying more than {inr(remainThisMonth)} rolls over to upcoming months as advance EMI.</>
+            ) : (
+              <>{MONTHS[pm - 1]} {py}: paid {inr(paidThisMonth)} · you can pay up to <b>{inr(remainThisMonth)}</b> more this month. (Advance EMI is off.)</>
+            )}
           </div>
           <div className="flex flex-wrap gap-2 mb-4">
             <Quick label="Remaining EMI" onClick={() => setForm({ ...form, payment_amount: remainThisMonth })} />
-            <Quick label="2 Months" onClick={() => setForm({ ...form, payment_amount: Math.round((remainThisMonth + emiAmount) * 100) / 100 })} />
+            {allowAdvance && (
+              <Quick label="2 Months" onClick={() => setForm({ ...form, payment_amount: Math.round((remainThisMonth + emiAmount) * 100) / 100 })} />
+            )}
             <Quick label="Interest Only" onClick={() => setForm({ ...form, payment_amount: loan.current_month_interest })} />
           </div>
           <form onSubmit={pay} className="space-y-3">
@@ -336,9 +353,15 @@ export default function LoanDetail() {
               <input type="number" required min="1" step="0.01" value={form.payment_amount}
                 onChange={(e) => setForm({ ...form, payment_amount: e.target.value })} className={inputClass} />
               {Number(form.payment_amount) > remainThisMonth && (
-                <p className="mt-1 text-xs text-blue-600">
-                  {inr(remainThisMonth)} covers this month; the extra {inr(Math.round((Number(form.payment_amount) - remainThisMonth) * 100) / 100)} will apply to upcoming month(s) as advance EMI.
-                </p>
+                allowAdvance ? (
+                  <p className="mt-1 text-xs text-blue-600">
+                    {inr(remainThisMonth)} covers this month; the extra {inr(Math.round((Number(form.payment_amount) - remainThisMonth) * 100) / 100)} will apply to upcoming month(s) as advance EMI.
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-red-600">
+                    Exceeds this month's remaining EMI ({inr(remainThisMonth)}). Advance EMI is disabled in Settings.
+                  </p>
+                )
               )}
             </Field>
             <Field label="Payment Date">
@@ -348,7 +371,7 @@ export default function LoanDetail() {
               <input value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} className={inputClass} />
             </Field>
             <div className="flex gap-3 pt-2">
-              <button type="submit" className="flex-1 bg-brand-600 text-white py-2 rounded-lg hover:bg-brand-700">Submit</button>
+              <button type="submit" disabled={!allowAdvance && Number(form.payment_amount) > remainThisMonth} className="flex-1 bg-brand-600 text-white py-2 rounded-lg hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed">Submit</button>
               <button type="button" onClick={() => setModal(false)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300">Cancel</button>
             </div>
           </form>
@@ -365,7 +388,7 @@ export default function LoanDetail() {
             // re-set to is the current available fund plus what this loan already took out.
             const maxPrincipal = availableFund != null ? availableFund + currentPrincipal : null;
             const entered = Number(editForm.principal_amount || 0);
-            const exceeds = maxPrincipal != null && entered > maxPrincipal;
+            const exceeds = enforceFundLimit && maxPrincipal != null && entered > maxPrincipal;
             return (
           <form onSubmit={saveEdit} className="space-y-3">
             {availableFund != null && (
