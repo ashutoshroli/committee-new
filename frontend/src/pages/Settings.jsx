@@ -28,6 +28,7 @@ export default function Settings() {
         late_fine_per_month: Number(form.late_fine_per_month || 0),
         grace_period_days: Number(form.grace_period_days || 0),
         payment_due_day: Number(form.payment_due_day || 5),
+        loan_request_day: Number(form.loan_request_day || 10),
         enforce_fund_limit: !!form.enforce_fund_limit,
         allow_advance_emi: !!form.allow_advance_emi,
         compound_unpaid_interest: !!form.compound_unpaid_interest,
@@ -82,6 +83,9 @@ export default function Settings() {
             </Field>
             <Field label="Payment Due Day (1-28)">
               <input type="number" min="1" max="28" value={form.payment_due_day || ''} onChange={set('payment_due_day')} className={inputClass} />
+            </Field>
+            <Field label="Loan Request Closes On (day of month)">
+              <input type="number" min="1" max="28" value={form.loan_request_day || ''} onChange={set('loan_request_day')} className={inputClass} />
             </Field>
           </div>
 

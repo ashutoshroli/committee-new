@@ -18,6 +18,7 @@ exports.update = asyncHandler(async (req, res) => {
     name, description, monthly_instalment, default_interest_rate,
     late_fine_per_day, late_fine_per_month, grace_period_days, payment_due_day,
     enforce_fund_limit, allow_advance_emi, compound_unpaid_interest, allow_foreclosure,
+    loan_request_day,
   } = req.body;
 
   const existing = await db.query('SELECT id FROM committee_settings ORDER BY id LIMIT 1');
@@ -39,11 +40,13 @@ exports.update = asyncHandler(async (req, res) => {
         allow_advance_emi = COALESCE($10, allow_advance_emi),
         compound_unpaid_interest = COALESCE($11, compound_unpaid_interest),
         allow_foreclosure = COALESCE($12, allow_foreclosure),
+        loan_request_day = COALESCE($13, loan_request_day),
         updated_at = NOW()
-     WHERE id = $13 RETURNING *`,
+     WHERE id = $14 RETURNING *`,
     [name, description, monthly_instalment, default_interest_rate,
      late_fine_per_day, late_fine_per_month, grace_period_days, payment_due_day,
      enforce_fund_limit, allow_advance_emi, compound_unpaid_interest, allow_foreclosure,
+     loan_request_day,
      existing.rows[0].id]
   );
   await logActivity(req, 'update', 'settings', existing.rows[0].id, 'Updated committee settings');

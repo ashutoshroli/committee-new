@@ -29,6 +29,7 @@ CREATE TABLE committee_settings (
     allow_advance_emi        BOOLEAN DEFAULT TRUE,  -- extra payment rolls over to next month(s)
     compound_unpaid_interest BOOLEAN DEFAULT TRUE,  -- unpaid monthly interest is added to principal
     allow_foreclosure        BOOLEAN DEFAULT TRUE,  -- foreclosure is permitted
+    loan_request_day         INTEGER DEFAULT 10,    -- day of month the loan-request window closes
     created_at             TIMESTAMPTZ DEFAULT NOW(),
     updated_at             TIMESTAMPTZ DEFAULT NOW()
 );
@@ -166,6 +167,26 @@ CREATE TABLE IF NOT EXISTS activity_logs (
     description  TEXT,
     created_at   TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- =====================================================================
+-- 10. LOAN REQUESTS  (member requests -> review -> pro-rata allocation -> disburse)
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS loan_requests (
+    id                     SERIAL PRIMARY KEY,
+    member_id              INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+    requested_amount       NUMERIC(12, 2) NOT NULL,
+    allocated_amount       NUMERIC(12, 2) DEFAULT 0,
+    tenure_months          INTEGER,
+    interest_rate          NUMERIC(5, 2),
+    monthly_payment_amount NUMERIC(12, 2),
+    purpose                TEXT,
+    status                 VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending|approved|rejected|revoked|allocated|disbursed
+    loan_id                INTEGER REFERENCES loans(id) ON DELETE SET NULL,
+    created_at             TIMESTAMPTZ DEFAULT NOW(),
+    updated_at             TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_loan_requests_status ON loan_requests(status);
+CREATE INDEX IF NOT EXISTS idx_loan_requests_member ON loan_requests(member_id);
 
 -- =====================================================================
 -- INDEXES

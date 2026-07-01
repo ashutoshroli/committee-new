@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
-  FiHome, FiUsers, FiDollarSign, FiCalendar, FiSettings, FiUserCheck, FiActivity, FiLogOut, FiMenu, FiX,
+  FiHome, FiUsers, FiDollarSign, FiCalendar, FiSettings, FiUserCheck, FiActivity, FiInbox, FiLogOut, FiMenu, FiX,
 } from 'react-icons/fi';
 
 export default function Layout() {
@@ -19,6 +19,7 @@ export default function Layout() {
     { to: '/', icon: FiHome, label: 'Dashboard', end: true },
     { to: '/members', icon: FiUsers, label: 'Members' },
     { to: '/loans', icon: FiDollarSign, label: 'Loans' },
+    { to: '/loan-requests', icon: FiInbox, label: 'Loan Requests' },
     { to: '/instalments', icon: FiCalendar, label: 'Instalments' },
     { to: '/settings', icon: FiSettings, label: 'Settings' },
   ];

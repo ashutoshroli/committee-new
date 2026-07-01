@@ -9,6 +9,7 @@ import MemberDetail from './pages/MemberDetail';
 import Loans from './pages/Loans';
 import CreateLoan from './pages/CreateLoan';
 import LoanDetail from './pages/LoanDetail';
+import LoanRequests from './pages/LoanRequests';
 import Instalments from './pages/Instalments';
 import Settings from './pages/Settings';
 import Users from './pages/Users';
@@ -47,6 +48,7 @@ export default function App() {
             <Route path="loans" element={<Loans />} />
             <Route path="loans/create" element={<CreateLoan />} />
             <Route path="loans/:id" element={<LoanDetail />} />
+            <Route path="loan-requests" element={<LoanRequests />} />
             <Route path="instalments" element={<Instalments />} />
             <Route path="settings" element={<Settings />} />
             <Route path="users" element={<AdminOnly><Users /></AdminOnly>} />
